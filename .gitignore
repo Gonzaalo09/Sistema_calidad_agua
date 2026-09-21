@@ -1,0 +1,30 @@
+# Compilación ESP-IDF
+build/
+managed_components/
+dependencies.lock
+
+# Configuración generada (se reconstruye a partir de sdkconfig.defaults)
+sdkconfig
+sdkconfig.old
+
+# Editor / IDE
+.vscode/
+
+# Documentación / datasheets
+*.pdf
+
+# Credenciales locales (no versionar)
+secrets.h
+
+# Cachés y temporales habituales
+*.o
+*.a
+*.elf
+*.bin
+*.map
+*.d
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db
+*.log
