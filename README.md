@@ -27,9 +27,6 @@ su papel en la arquitectura global.
 Direcciones esperadas en el escaneo I2C: `0x57`, `0x68` (y `0x3C` cuando
 se conecte la pantalla).
 
-TODO: confirmar si se ha retirado la resistencia de carga (200 Ω) del
-módulo DS3231, que no debe cargar una CR2032.
-
 ## Arquitectura
 
 ```
