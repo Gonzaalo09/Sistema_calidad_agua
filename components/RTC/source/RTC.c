@@ -25,8 +25,8 @@ static const uint32_t RTC_VELOCIDAD_HZ = 100000;
 static const int RTC_TIMEOUT_MS = 100;
 
 static const uint8_t REG_SEGUNDOS = 0x00; ///< Registro donde comienzan los datos, empiezan con los segundos
-static const uint8_t REG_CONTROL = 0x0E;  ///< Registro de control  
-static const uint8_t REG_ESTADO = 0x0F;  ///< REG_ESTADO del oscilador (OSF)
+//static const uint8_t REG_CONTROL = 0x0E;  ///< Registro de control
+static const uint8_t REG_ESTADO = 0x0F;   ///< REG_ESTADO del oscilador (OSF)
 static const uint8_t REG_TEMP_MSB = 0x11;
 
 static const uint8_t BIT_OSF = (1U << 7);      ///< Bit donde esta el que te dice si está parado o no
@@ -384,8 +384,8 @@ esp_err_t rtc_init(void)
         dev_handle = NULL;
         return err;
     }
-    
-    return ESP_OK; 
+
+    return ESP_OK;
 }
 
 /**
@@ -397,7 +397,7 @@ esp_err_t rtc_init(void)
 rtc_estado_t rtc_leer_hora(struct tm *utc)
 {
     uint8_t buffer[7];
-    //No hace falta que sea *buffer porque es un array, que por C se "degrada" y se convierte en un pointer
+    // No hace falta que sea *buffer porque es un array, que por C se "degrada" y se convierte en un pointer
     esp_err_t err = leer_registros(dev_handle, REG_SEGUNDOS, buffer, 7);
 
     if (err != ESP_OK)
@@ -417,28 +417,28 @@ rtc_estado_t rtc_leer_hora(struct tm *utc)
 rtc_estado_t rtc_fijar_hora(const struct tm *utc)
 {
     uint8_t datos[7];
-    
+
     rtc_estado_t est = codificar_hora(utc, datos);
 
     if (est != RTC_OK)
     {
-        return est; 
+        return est;
     }
 
     esp_err_t err = escribir_registros(dev_handle, REG_SEGUNDOS, datos, 7);
 
     if (err != ESP_OK)
     {
-        return mapear_error(err); 
+        return mapear_error(err);
     }
 
     struct tm leido;
-    //Verificamos lo escrito 
+    // Verificamos lo escrito
     est = rtc_leer_hora(&leido);
-    
+
     if (est != RTC_OK)
     {
-        return est; 
+        return est;
     }
 
     if (llabs(tm_a_segundos_utc(&leido) - tm_a_segundos_utc(utc)) > 2)
@@ -446,15 +446,16 @@ rtc_estado_t rtc_fijar_hora(const struct tm *utc)
         return RTC_HORA_INCOHERENTE;
     }
 
-    //Ahora borramos OSF(registro del oscilador), nunca antes de fijar la hora
-    uint8_t estado; 
+    // Ahora borramos OSF(registro del oscilador), nunca antes de fijar la hora
+    uint8_t estado;
     err = leer_registros(dev_handle, REG_ESTADO, &estado, 1);
 
-    if (err != ESP_OK) {
+    if (err != ESP_OK)
+    {
         return mapear_error(err);
     }
 
-    estado = estado & ~BIT_OSF; 
+    estado = estado & ~BIT_OSF;
 
     err = escribir_registros(dev_handle, REG_ESTADO, &estado, 1);
 
@@ -468,12 +469,12 @@ rtc_estado_t rtc_fijar_hora(const struct tm *utc)
  */
 rtc_estado_t rtc_comprobar_oscilador(void)
 {
-    uint8_t estado; 
+    uint8_t estado;
     esp_err_t err = leer_registros(dev_handle, REG_ESTADO, &estado, 1);
 
-    if (err != ESP_OK) 
+    if (err != ESP_OK)
     {
-        return mapear_error(err); 
+        return mapear_error(err);
     }
 
     if (estado & BIT_OSF)
@@ -481,7 +482,7 @@ rtc_estado_t rtc_comprobar_oscilador(void)
         return RTC_OSCILADOR_PARADO;
     }
 
-    return RTC_OK; 
+    return RTC_OK;
 }
 
 /**
@@ -492,16 +493,15 @@ rtc_estado_t rtc_comprobar_oscilador(void)
  */
 rtc_estado_t rtc_leer_temperatura(float *grados_c)
 {
-    uint8_t bcd[2]; 
+    uint8_t bcd[2];
     esp_err_t err = leer_registros(dev_handle, REG_TEMP_MSB, bcd, 2);
 
     if (err != ESP_OK)
     {
-        return mapear_error(err); 
+        return mapear_error(err);
     }
 
     *grados_c = decodificar_temperatura((int8_t)bcd[0], bcd[1]);
 
-    return RTC_OK; 
+    return RTC_OK;
 }
-

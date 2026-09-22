@@ -8,6 +8,7 @@
 #include "modbus.h"
 #include "sensores.h"
 #include "tarea_polling.h"
+#include "tarea_rtc.h"
 
 QueueHandle_t cola_lecturas;
 
@@ -30,16 +31,14 @@ void tarea_polling(void *parametros)
             sensor_descrip entrada = TABLA_SENSORES[i];
 
             construir_peticion(peticion, entrada.slave_id, entrada.reg_H, entrada.reg_L, entrada.num_registros);
-           
-           
-            // Para ver por pantalla la trama que estás enviando 
-           /* for (int j = 0; j < 8; j++)
-            {
-                printf("%02X ", peticion[j]);
-            }
-            printf("\n");
-            */
-            
+
+            // Para ver por pantalla la trama que estás enviando
+            /* for (int j = 0; j < 8; j++)
+             {
+                 printf("%02X ", peticion[j]);
+             }
+             printf("\n");
+             */
 
             uart_write_bytes(UART_NUM_2, peticion, 8);
 
@@ -67,7 +66,7 @@ void tarea_polling(void *parametros)
                             {
                                 lectura.valido = true;
 
-                                /*Para ver por pantalla la trama que recibes 
+                                /*Para ver por pantalla la trama que recibes
                                 for (int k = 0; k < longitud; k++)
                                     printf("%02X ", datos_rx[k]);
                                     */
@@ -79,10 +78,16 @@ void tarea_polling(void *parametros)
                 {
                     decodificar_datos(datos_rx, entrada.tipo, entrada.num_valores, valores);
 
+                    uint32_t ts = rtc_timestamp_pais();
+                    if (ts == 0)
+                    {
+                        printf("%s: timestamp no fiable (RTC no responde)\n", entrada.nombres_datos[0]);
+                    }
+
                     for (int j = 0; j <= entrada.num_valores - 1; j++)
                     {
                         strcpy(lectura.nombre, entrada.nombres_datos[j]);
-                        lectura.timestamp = xTaskGetTickCount();
+                        lectura.timestamp = ts;
                         lectura.valor = valores[j];
                         xQueueSend(cola_lecturas, &lectura, 0);
                     }
