@@ -16,6 +16,8 @@ sdkconfig.old
 # Credenciales locales (no versionar)
 secrets.h
 
+notas_privadas.md
+
 # Cachés y temporales habituales
 *.o
 *.a

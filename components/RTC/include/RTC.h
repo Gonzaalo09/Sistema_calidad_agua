@@ -8,15 +8,15 @@
  * Esto nos sirve para diferenciar entre errores de comunicación y del RTC, para cuando queramos tener la hora
  * necesitamos saber si es fiable o no. también para la sincronización(más adelante).
  */
-typedef struct rtc_estado_t {
-    enum RTC_OK;
-    enum RTC_NO_RESPONDE; //NACK o timeout en el bus
-    enum RTC_OSCILADOR_PARADO; // flag OSF = 1, hora no fiable
-    enum RTC_HORA_INCOHERENTE; // Campos fuera de rango, modo 12h inesperado
-    enum RTC_OCUPADO; // Otra tarea está escribiendo la hora
+typedef enum {
+     RTC_OK,
+     RTC_NO_RESPONDE, //NACK o timeout en el bus
+     RTC_OSCILADOR_PARADO, // flag OSF = 1, hora no fiable
+     RTC_HORA_INCOHERENTE, // Campos fuera de rango, modo 12h inesperado
+     RTC_OCUPADO // Otra tarea está escribiendo la hora
 }rtc_estado_t;
 
-esp_err_t rtc_inict(void);
+esp_err_t rtc_init(void);
 
 rtc_estado_t rtc_leer_hora(struct tm *utc);
 
