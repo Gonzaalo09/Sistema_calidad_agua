@@ -345,7 +345,7 @@ static rtc_estado_t mapear_error(esp_err_t err)
  *
  * @return esp_err_t ESP_OK si el RTC quedó listo para usarse
  */
-esp_err_t rtc_init(void)
+esp_err_t rtc_ds3231_init(void)
 {
     if (dev_handle != NULL)
     {

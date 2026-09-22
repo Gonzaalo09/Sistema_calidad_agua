@@ -16,7 +16,7 @@ typedef enum {
      RTC_OCUPADO // Otra tarea está escribiendo la hora
 }rtc_estado_t;
 
-esp_err_t rtc_init(void);
+esp_err_t rtc_ds3231_init(void);
 
 rtc_estado_t rtc_leer_hora(struct tm *utc);
 

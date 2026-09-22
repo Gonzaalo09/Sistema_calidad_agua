@@ -22,7 +22,7 @@ const int uart_buffer_size = 256;
 QueueHandle_t uart_queue;
 
 // Poner a 0 tras la primera escritura correcta del RTC.
-#define FORZAR_HORA 1
+#define FORZAR_HORA 0
 
 static struct tm hora_compilacion_a_utc(void)
 {
@@ -93,7 +93,7 @@ void app_main(void)
     {
         i2c_bus_scan();
 
-        esp_err_t err_rtc = rtc_init();
+        esp_err_t err_rtc = rtc_ds3231_init();
         if (err_rtc != ESP_OK)
         {
             ESP_LOGW(TAG, "RTC no disponible al arrancar");
