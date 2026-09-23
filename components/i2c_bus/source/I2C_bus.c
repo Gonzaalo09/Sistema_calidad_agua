@@ -1,7 +1,7 @@
 #include "driver/i2c_master.h"
 #include "esp_log.h"
 
-#include "i2c_bus.h"
+#include "I2C_bus.h"
 
 #define I2C_SDA_IO  GPIO_NUM_21
 #define I2C_SCL_IO  GPIO_NUM_22
@@ -26,6 +26,10 @@ esp_err_t i2c_bus_init(void){
         .flags.enable_internal_pullup = true,
     };
 
+    /**
+     * Creas un bus, reservas el puerto y pones las configuraciones para crear el bus de I2C, devuelve el bus_handle que luego
+     * es el que se usa para añadir nuevos dispositivos
+     */
     esp_err_t err = i2c_new_master_bus(&i2c_mst_config, &i2c_bus_handle);
 
     if (err != ESP_OK) {
@@ -35,10 +39,16 @@ esp_err_t i2c_bus_init(void){
     return err;
 }
 
+/**
+ * Para dar el bus_handle en otros archivos
+ */
 i2c_master_bus_handle_t get_i2c_bus(void) {
     return i2c_bus_handle; 
 }
 
+/**
+ * Escaneas el bus que acabas de crear para detectar perifericos    
+ */
 void i2c_bus_scan(void) {
     if (i2c_bus_handle == NULL) {
         ESP_LOGE(TAG, "Bus I2C no creado correctamente");
@@ -49,8 +59,8 @@ void i2c_bus_scan(void) {
         if (err == ESP_OK) {
             ESP_LOGI(TAG, "Dispositivo en dir 0x%02X", i);
         }else if(err == ESP_ERR_TIMEOUT) {
-            ESP_LOGW(TAG, "Timeout, mirar cables");
-            return;
+            ESP_LOGW(TAG, "Timeout, mirar cables, en dir 0x%02X", i);
+        
         }
     }
 } 

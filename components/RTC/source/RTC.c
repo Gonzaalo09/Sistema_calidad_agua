@@ -340,6 +340,7 @@ static rtc_estado_t mapear_error(esp_err_t err)
 }
 
 /*=========================================Capa 3: FUNCIONES PUBLICAS============================================*/
+
 /**
  * @brief Inicializamos el RTC, mirando paso por paso si está todo bien creado, esto es el bus I2C, si responde el RTC etc
  *
@@ -366,6 +367,9 @@ esp_err_t rtc_ds3231_init(void)
         .scl_speed_hz = RTC_VELOCIDAD_HZ,      // 100000
     };
 
+    /**
+     * Añade un dispositivo a traves del bus creado en I2C, lo tienes en dev_handle
+     */
     esp_err_t err = i2c_master_bus_add_device(bus, &cfg, &dev_handle);
 
     if (err != ESP_OK)

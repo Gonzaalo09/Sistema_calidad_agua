@@ -12,7 +12,7 @@
 #include "modbus.h"
 #include "tarea_polling.h"
 #include "tarea_transmision.h"
-#include "i2c_bus.h"
+#include "I2C_bus.h"
 #include "RTC.h"
 #include "tarea_rtc.h"
 
