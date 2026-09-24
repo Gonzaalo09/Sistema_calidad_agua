@@ -15,6 +15,7 @@
 #include "I2C_bus.h"
 #include "RTC.h"
 #include "tarea_rtc.h"
+#include "pantalla_oled.h"
 
 static const char *TAG = "main";
 
@@ -114,6 +115,14 @@ void app_main(void)
         {
             ESP_LOGW(TAG, "No se pudo comprobar el oscilador (código %d)", est_osc);
         }
+    }
+    oled_estado_t est_oled = pantalla_oled_init(); 
+    if (est_oled != OLED_OK)
+    {
+        ESP_LOGW(TAG, "Pantalla no disponible (%d)", est_oled);
+    }else 
+    {
+        pantalla_oled_texto_prueba();
     }
 
     xTaskCreate(tarea_polling, "polling", 4096, NULL, 5, NULL);
