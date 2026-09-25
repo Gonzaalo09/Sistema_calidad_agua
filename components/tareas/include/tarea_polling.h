@@ -1,5 +1,5 @@
-#ifndef TAREA_POLLING
-#define TAREA_POLLING
+#ifndef TAREA_POLLING_H
+#define TAREA_POLLING_H
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"

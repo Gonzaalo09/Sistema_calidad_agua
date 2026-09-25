@@ -1,5 +1,5 @@
-#ifndef PANTALLA_OLED
-#define PANTALLA_OLED
+#ifndef PANTALLA_OLED_H
+#define PANTALLA_OLED_H
 
 /**
  * Estado de la pantalla, para distinguir entre fallo del bus, pantalla que no responde

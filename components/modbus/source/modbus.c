@@ -1,3 +1,33 @@
+/*
+ * modbus.c
+ *
+ * Protocolo Modbus RTU: CRC16, construcción de peticiones (función 0x03,
+ * leer holding registers) y decodificación de la respuesta. Genérico: no
+ * sabe nada de sensores concretos ni toca hardware.
+ *
+ * ORDEN DE BYTES EN LOS FLOAT (float32_CDAB)
+ *
+ * Los sensores de OD y pH (REMOND) codifican cada valor como float32
+ * IEEE-754 en orden CDAB (word-swapped): mandan primero la palabra
+ * "Data_L" y luego la "Data_H", al revés del orden estándar.
+ *
+ * Al reorden CDAB del sensor hay que sumarle un SEGUNDO reordenamiento,
+ * porque el ESP32 es little-endian y memcpy reconstruye el float según
+ * el orden en que estén los bytes en memoria. La combinación de ambos es
+ * lo que hace decodificar_datos para bytes recibidos como C,D,A,B.
+ *
+ * Al integrar un sensor nuevo con floats Modbus: verificar SIEMPRE su
+ * orden de bytes contra un ejemplo numérico real de su datasheet, nunca
+ * asumirlo. Hay cuatro variantes posibles (ABCD, BADC, CDAB, DCBA) y
+ * ninguna es "la estándar" de Modbus: cada fabricante elige la suya.
+ * Un orden equivocado no da error, da floats astronómicos o NaN.
+ *
+ * Fuentes:
+ *  - Modbus Application Protocol Specification V1.1b3, apartado 6.3
+ *    (Read Holding Registers, 0x03). https://modbus.org/specs.php
+ *  - Datasheets de los sensores REMOND (OD y pH) para el orden de bytes.
+ */
+
 #include <stdio.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
