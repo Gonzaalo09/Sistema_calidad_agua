@@ -16,6 +16,8 @@
 #include "RTC.h"
 #include "tarea_rtc.h"
 #include "pantalla_oled.h"
+#include "estado_sistema.h"
+#include "tarea_pantalla.h"
 
 static const char *TAG = "main";
 
@@ -59,12 +61,12 @@ static struct tm hora_compilacion_a_utc(void)
     // TZ no está fijada -> mktime interpreta t_local como si ya fuera UTC.
     // t_local es hora LOCAL (la del PC al compilar), así que restamos
     // OFFSET_PAIS_S (definida en tarea_rtc.h) para obtener UTC real.
-    //mktime pasa de structm a numero 
+    // mktime pasa de structm a numero
     time_t epoch_local = mktime(&t_local);
     time_t epoch_utc = epoch_local - OFFSET_PAIS_S;
 
     struct tm utc;
-    //gmtime_r toma el número ts(segundos desde 1970) y lo descompone en año,mes,día...
+    // gmtime_r toma el número ts(segundos desde 1970) y lo descompone en año,mes,día...
     gmtime_r(&epoch_utc, &utc);
     return utc;
 }
@@ -85,10 +87,18 @@ void app_main(void)
     ESP_ERROR_CHECK(uart_set_pin(UART_NUM_2, 17, 16, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
     ESP_ERROR_CHECK(uart_driver_install(UART_NUM_2, uart_buffer_size, uart_buffer_size, 10, &uart_queue, 0));
 
+    esp_err_t err_sistema = estado_sistema_init();
+    if (err_sistema != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Fallo creando el estado del sistema");
+    }
+
     esp_err_t err_bus = i2c_bus_init();
     if (err_bus != ESP_OK)
     {
         ESP_LOGE(TAG, "Fallo creando el bus I2C, RTC y pantalla no disponibles");
+        estado_sistema_publicar(FUENTE_RTC, NULL, 0, 0, ESTADO_SIN_RESPUESTA);
+        estado_sistema_publicar(FUENTE_PANTALLA, NULL, 0, 0, ESTADO_SIN_RESPUESTA);
     }
     else
     {
@@ -98,6 +108,7 @@ void app_main(void)
         if (err_rtc != ESP_OK)
         {
             ESP_LOGW(TAG, "RTC no disponible al arrancar");
+            estado_sistema_publicar(FUENTE_RTC, NULL, 0, 0, ESTADO_SIN_RESPUESTA);
         }
 
         rtc_estado_t est_osc = rtc_comprobar_oscilador();
@@ -106,6 +117,7 @@ void app_main(void)
             struct tm utc = hora_compilacion_a_utc();
             ESP_LOGW(TAG, "Fijando hora PROVISIONAL (compilación)");
             rtc_fijar_hora(&utc);
+            estado_sistema_publicar(FUENTE_RTC, NULL, 0, 0, ESTADO_SIN_HORA);
         }
         else if (est_osc == RTC_OK)
         {
@@ -116,16 +128,20 @@ void app_main(void)
             ESP_LOGW(TAG, "No se pudo comprobar el oscilador (código %d)", est_osc);
         }
     }
-    oled_estado_t est_oled = pantalla_oled_init(); 
+    oled_estado_t est_oled = pantalla_oled_init();
     if (est_oled != OLED_OK)
     {
         ESP_LOGW(TAG, "Pantalla no disponible (%d)", est_oled);
-    }else 
+        estado_sistema_publicar(FUENTE_PANTALLA, NULL, 0, 0, ESTADO_SIN_RESPUESTA);
+    }
+    else
     {
-        pantalla_oled_texto_prueba();
+        estado_sistema_publicar(FUENTE_PANTALLA, NULL, 0, 0, ESTADO_OK);
+        //pantalla_oled_texto_prueba();
     }
 
     xTaskCreate(tarea_polling, "polling", 4096, NULL, 5, NULL);
     xTaskCreate(tarea_transmision, "transmision", 4096, NULL, 3, NULL);
     xTaskCreate(tarea_rtc, "rtc_debug", 4096, NULL, 2, NULL);
+    xTaskCreate(tarea_pantalla, "pantalla", 4096, NULL, 2, NULL);
 }

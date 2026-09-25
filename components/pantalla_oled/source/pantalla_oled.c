@@ -89,8 +89,11 @@ static uint8_t u8x8_callback_bytes_i2c(u8x8_t *u8x8, uint8_t msg, uint8_t arg_in
             esp_err_t err = i2c_master_transmit(oled_dev, buf_tx, idx_tx, OLED_TIMEOUT_MS);
             if (err != ESP_OK)
             {
+                if (oled_est == OLED_OK)
+                {
+                    ESP_LOGE(TAG, "OLED no responde: %s (0x%x)", esp_err_to_name(err), err);
+                }
                 oled_est = OLED_NO_RESPONDE;
-                ESP_LOGE(TAG, "OLED no responde: %s (0x%x)", esp_err_to_name(err), err);
                 return 0;
             }
         }
@@ -114,7 +117,7 @@ static uint8_t u8x8_callback_bytes_i2c(u8x8_t *u8x8, uint8_t msg, uint8_t arg_in
 static uint8_t u8x8_gpio_callback_delay(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int, void *arg_ptr)
 {
     // Prueba temporal para ver los mensajes de delay que se envían
-    ESP_LOGW(TAG, "delay_cb: msg=%d arg=%d", msg, arg_int);
+    //ESP_LOGW(TAG, "delay_cb: msg=%d arg=%d", msg, arg_int);
     switch (msg)
     {
     // Aviso de que u8g2 va a empezar a pedir GPIO y delays. No hay pines que
@@ -242,5 +245,43 @@ void pantalla_oled_texto_prueba(void)
     u8g2_DrawUTF8(&u8g2, 0, 8, "1234567890123456789012345");
     u8g2_DrawUTF8(&u8g2, 0, 16, "Fósforo ñ á é í ó ú ¿?");
     u8g2_DrawUTF8(&u8g2, 0, 24, "PH: SIN RESPUESTA");
+    u8g2_SendBuffer(&u8g2);
+}
+
+void pantalla_oled_limpiar(void)
+{
+    // Si ni siquiera llego a registrarse el dispositivo, no hay nada que hacer
+    if (oled_dev == NULL)
+    {
+        return;
+    }
+    // Cada frame se juzga por si mismo: un fallo puntual del bus no puede
+    // dejar la pantalla muerta hasta el siguiente reinicio.
+    oled_est = OLED_OK;
+
+    u8g2_ClearBuffer(&u8g2);
+}
+
+void pantalla_oled_texto(uint8_t linea, const char *texto)
+{
+    if (oled_est != OLED_OK)
+    {
+        return;
+    }
+    if (linea >= PANTALLA_LINEAS)
+    {
+        return;
+    }
+    u8g2_SetFont(&u8g2, u8g2_font_5x8_tf);
+    // El (linea + 1) * 8 es porque en U8g2 la y de DrawUTF8 es la línea base del texto, no su borde superior. La línea 0 se dibuja con base en y=8, la 7 en y=64.
+    u8g2_DrawUTF8(&u8g2, 0, (linea + 1) * 8, texto); // y es la linea base no el texto
+}
+
+void pantalla_oled_mostrar(void)
+{
+    if (oled_est != OLED_OK)
+    {
+        return;
+    }
     u8g2_SendBuffer(&u8g2);
 }

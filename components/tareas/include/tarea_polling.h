@@ -5,7 +5,7 @@
 #include "freertos/task.h"
 #include "freertos/queue.h"
 
-#define PERIODO_MUESTREO_MS 4000
+#define PERIODO_MUESTREO_MS 10000
 
 extern QueueHandle_t uart_queue; //definida aquí pero declarada en main.c  
 

@@ -6,6 +6,7 @@
 
 #include "RTC.h"
 #include "tarea_rtc.h"
+#include "estado_sistema.h"
 
 static const char *TAG = "tarea_rtc";
 
@@ -32,6 +33,9 @@ void tarea_rtc(void *pvParameters)
 
         if (est == RTC_OK)
         {
+                uint32_t ts_pais = rtc_timestamp_pais();
+
+            estado_sistema_publicar(FUENTE_RTC, NULL, 0, ts_pais, ESTADO_OK);
             float temperatura;
             rtc_estado_t est_temp = rtc_leer_temperatura(&temperatura);
 
@@ -40,7 +44,7 @@ void tarea_rtc(void *pvParameters)
                 ESP_LOGI(TAG, "%04d-%02d-%02d %02d:%02d:%02d UTC  %.2f°C  ts_pais=%lu",
                          utc.tm_year + 1900, utc.tm_mon + 1, utc.tm_mday,
                          utc.tm_hour, utc.tm_min, utc.tm_sec, temperatura,
-                         (unsigned long)rtc_timestamp_pais());
+                         (unsigned long)ts_pais);
             }
             else
             {
@@ -50,8 +54,9 @@ void tarea_rtc(void *pvParameters)
         else
         {
             ESP_LOGW(TAG, "Error leyendo hora: %d", est);
+            estado_sistema_publicar(FUENTE_RTC, NULL, 0, 0, ESTADO_SIN_RESPUESTA); 
         }
 
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        vTaskDelay(pdMS_TO_TICKS(15000));
     }
 }
