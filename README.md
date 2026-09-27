@@ -2,7 +2,8 @@
 
 Firmware ESP-IDF para un nodo sensor de campo. Consulta sensores
 ambientales por Modbus RTU sobre RS-485, sella cada medida con la hora de
-un RTC DS3231 y muestra el estado del sistema en una pantalla OLED.
+un RTC DS3231 y muestra en una pantalla OLED los últimos valores y el
+estado de cada componente en lenguaje llano.
 
 TFG de Ingeniería de Telecomunicaciones (UPM, rama electrónica), dentro de
 un proyecto de cooperación internacional con despliegue en Perú. El nodo lo
@@ -18,15 +19,15 @@ un ordenador**, mirando la pantalla del nodo o los datos transmitidos.
 | 2. Tabla de sensores y tareas FreeRTOS | Validada en hardware |
 | 3. Bus I2C y RTC DS3231 | Validada en hardware |
 | 4a. Bring-up de la pantalla OLED | Validada en hardware |
-| 4b. Tabla de estado y pantallas de diagnóstico | En curso |
-| 5. Almacenamiento en microSD | Pendiente |
-| 6. Transmisión remota (SIM7600G) | Pendiente |
+| 4b. Tabla de estado y pantallas de diagnóstico | Validada en hardware |
+| 5. Transmisión remota (SIM7600G) | En curso |
+| 6. Almacenamiento en microSD | Pendiente |
 | 7. Gestión de energía (deep sleep, solar) | Pendiente |
 | 8. Sincronización temporal (GNSS/NTP) | Pendiente |
 
-Última validación (25/09/2026): NPK, OD y pH leyendo junto al RTC y al
-OLED en el mismo bus I2C, con el timestamp de cada medida en hora local de
-Perú.
+Última validación (25/09/2026): con un sensor o el RTC desconectados, la
+pantalla lo indica con una acción concreta, conserva los últimos valores
+buenos con la hora a la que se tomaron, y se recupera sola al reconectar.
 
 ## Hardware
 
@@ -43,22 +44,24 @@ Perú.
 ## Arquitectura
 
 ```
-app_main ── UART2, bus I2C, RTC, OLED ── crea las tareas y retorna
+app_main ── UART2, estado_sistema, bus I2C, RTC, OLED ── crea las tareas
 
 tarea_polling (5) ──cola_lecturas──> tarea_transmision (3)
       │
-      ▼
-tarea_rtc (2) ──────── RTC (DS3231) ────┐
-                                        ├── I2C_bus
-tarea_display (2) ─── pantalla_oled ────┘
-         │
-         └── estado_sistema ←── publican polling, rtc y main
+      ├── RTC (DS3231) ──────┐
+      ▼                      ├── I2C_bus
+   estado_sistema            │
+      ▲                      │
+      └── tarea_pantalla (2) ─┴── pantalla_oled ── u8g2
+
+tarea_rtc (2, depuracion)
 ```
 
-`cola_lecturas` tiene un único consumidor. Los demás lectores (pantalla,
-trama) usan `estado_sistema`, una tabla compartida protegida con mutex en
-la que cada fuente publica su último valor, su estado y cuándo funcionó
-por última vez.
+`cola_lecturas` tiene un único consumidor. Los demás lectores usan
+`estado_sistema`, una tabla compartida protegida con mutex en la que cada
+fuente publica su último valor, su estado y cuándo funcionó por última vez.
+La pantalla y, más adelante, la trama transmitida, son dos formas de
+mostrar esa misma tabla.
 
 ### Componentes
 
@@ -68,14 +71,31 @@ por última vez.
 | `sensores` | `TABLA_SENSORES`, el descriptor de cada sensor y el tipo `lectura_sensor` |
 | `I2C_bus` | Dueño único del bus I2C; cada chip registra su propio dispositivo |
 | `RTC` | Driver propio del DS3231 en tres capas, siempre en UTC |
-| `pantalla_oled` | Driver del SSD1306 sobre U8g2, con las callbacks de I2C y esperas |
+| `pantalla_oled` | Driver del SSD1306 sobre U8g2: callbacks de I2C y esperas, y primitivas de dibujo por líneas |
 | `u8g2` | Librería de terceros (olikraus, BSD), copiada al repo para poder compilar sin internet |
-| `tareas` | `tarea_polling`, `tarea_transmision` y `tarea_rtc` |
-| `estado_sistema` | Tabla de estado por fuente, con mutex (en curso) |
+| `estado_sistema` | Tabla de estado por fuente, con mutex |
+| `tareas` | `tarea_polling`, `tarea_transmision`, `tarea_rtc` y `tarea_pantalla` |
 
 Para añadir un sensor solo se toca `sensores.c`: el número de sensores se
 calcula en compilación y un `_Static_assert` corta el build si se supera
 el máximo.
+
+## Diagnóstico en pantalla
+
+Dos páginas que rotan cada 5 s, repintadas cada segundo. El reloj con
+segundos aparece en ambas: si se queda parado, el firmware está colgado.
+
+```
+2026-09-25 16:41:10          2026-09-25 16:41:15
+
+NPK  84.0 117.0 235.0        RED: SIN DATOS
+OD   8.6 27.0 !16:20
+  OD: revisar cable/12V
+pH   7.7 27.1
+```
+
+Un sensor averiado conserva sus últimos valores buenos, marcados con la
+hora a la que se tomaron, y añade debajo la acción concreta a realizar.
 
 ## Convención de tiempo
 
@@ -101,11 +121,14 @@ estar en la zona horaria del país de despliegue.
 
 ## Limitaciones conocidas
 
-- Un fallo de sensor todavía no deja rastro visible: se resuelve con
-  `estado_sistema` (fase 4b).
-- Una medida válida puede salir con timestamp 0 si el RTC falla.
+- El timestamp marca el **inicio del ciclo de muestreo**, no el instante
+  exacto de cada medida: con tres sensores y timeouts de 1 s, la
+  desviación puede llegar a 3 s. Irrelevante para el muestreo previsto,
+  pero es lo primero a revisar en la fase de sincronización temporal.
 - En el montaje sobre protoboard aparece un dispositivo I2C sin explicar en
   0x5F y timeouts intermitentes en direcciones vacías. Pendiente de
   comprobar sobre PCB.
+- El electrodo de oxígeno disuelto necesita 4 h de polarización tras
+  cualquier corte de alimentación antes de dar medidas fiables.
 - GPIO16/17 están reservados a la PSRAM en el WROVER-E: hay que reasignar
   UART2 al migrar al LilyGo.
