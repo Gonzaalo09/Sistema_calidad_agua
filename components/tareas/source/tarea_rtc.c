@@ -33,7 +33,7 @@ void tarea_rtc(void *pvParameters)
 
         if (est == RTC_OK)
         {
-                uint32_t ts_pais = rtc_timestamp_pais();
+            uint32_t ts_pais = (uint32_t)(mktime(&utc) + OFFSET_PAIS_S);
 
             estado_sistema_publicar(FUENTE_RTC, NULL, 0, ts_pais, ESTADO_OK);
             float temperatura;
@@ -54,7 +54,7 @@ void tarea_rtc(void *pvParameters)
         else
         {
             ESP_LOGW(TAG, "Error leyendo hora: %d", est);
-            estado_sistema_publicar(FUENTE_RTC, NULL, 0, 0, ESTADO_SIN_RESPUESTA); 
+            estado_sistema_publicar(FUENTE_RTC, NULL, 0, 0, ESTADO_SIN_HORA);
         }
 
         vTaskDelay(pdMS_TO_TICKS(15000));

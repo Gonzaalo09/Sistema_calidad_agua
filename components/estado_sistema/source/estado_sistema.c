@@ -37,6 +37,7 @@ esp_err_t estado_sistema_init(void)
     tabla[FUENTE_RTC].nombre = "RTC";
     tabla[FUENTE_PANTALLA].nombre = "Pantalla";
     tabla[FUENTE_RED].nombre = "Red";
+    tabla[FUENTE_SD].nombre = "SD";
 
     for (size_t i = 0; i < NUM_SENSORES; i++)
     {
@@ -144,6 +145,18 @@ const char *estado_sistema_texto(estado_codigo_t codigo)
     case ESTADO_SIN_DATOS:
         return "SIN DATOS";
 
+    case ESTADO_SD_AUSENTE: 
+        return "NO DETECTADA";
+
+    case ESTADO_SD_SIN_FORMATO:
+        return "SIN FORMATO";
+    
+    case ESTADO_SD_LLENA: 
+        return "LLENA"; 
+
+    case ESTADO_SD_ERROR_ESCRITURA: 
+        return "ERROR ESCRITURA";
+
     default:
         return "?";
     }
@@ -161,6 +174,18 @@ const char *estado_sistema_accion(estado_codigo_t codigo)
 
     case ESTADO_SIN_HORA:
         return "avisar al tecnico";
+
+    case ESTADO_SD_AUSENTE:
+        return "meter o cambiar SD"; 
+
+    case ESTADO_SD_SIN_FORMATO: 
+        return "formatear FAT32 en PC"; 
+
+    case ESTADO_SD_LLENA: 
+        return "cambiar tarjeta";
+
+    case ESTADO_SD_ERROR_ESCRITURA: 
+        return "cambiar tarjeta";
 
     default:
         return "";

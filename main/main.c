@@ -18,6 +18,8 @@
 #include "pantalla_oled.h"
 #include "estado_sistema.h"
 #include "tarea_pantalla.h"
+#include "config_nodo.h"
+#include "tarjeta_sd.h"
 
 static const char *TAG = "main";
 
@@ -93,6 +95,13 @@ void app_main(void)
         ESP_LOGE(TAG, "Fallo creando el estado del sistema");
     }
 
+    cfg_nodo_estado_t est_cfg = config_nodo_init();
+
+    if (est_cfg != CFG_NODO_OK)
+    {
+        ESP_LOGW(TAG, "Configuracion del nodo incompleta (%d)", est_cfg);
+    }
+
     esp_err_t err_bus = i2c_bus_init();
     if (err_bus != ESP_OK)
     {
@@ -137,7 +146,18 @@ void app_main(void)
     else
     {
         estado_sistema_publicar(FUENTE_PANTALLA, NULL, 0, 0, ESTADO_OK);
-        //pantalla_oled_texto_prueba();
+        // pantalla_oled_texto_prueba();
+    }
+
+    sd_estado_t est_sd = tarjeta_sd_init();
+
+    if (est_sd == SD_EST_OK)
+    {
+        tarjeta_sd_info();
+    }
+    else
+    {
+        ESP_LOGW(TAG, "SD no disponible al arrancar (%d)", est_sd);
     }
 
     xTaskCreate(tarea_polling, "polling", 4096, NULL, 5, NULL);

@@ -19,16 +19,6 @@ typedef struct sensor_descrip {
 
 } sensor_descrip;
 
-/**
- * Estructura de un resultado de un sensor ya interpretado
- */
-typedef struct lectura_sensor {
-    char nombre[16]; 
-    float valor;
-    uint32_t timestamp; 
-    bool valido;
-} lectura_sensor; 
-
 extern const sensor_descrip TABLA_SENSORES[]; 
 extern const size_t NUM_SENSORES; 
 #endif

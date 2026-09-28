@@ -14,8 +14,9 @@ enum
     FUENTE_RTC = 0,
     FUENTE_PANTALLA = 1, 
     FUENTE_RED = 2, //Red mobil 
-    FUENTE_SENSOR_BASE = 3, 
-    NUM_FUENTES = FUENTE_SENSOR_BASE + MAX_SENSORES // 11
+    FUENTE_SD = 3,
+    FUENTE_SENSOR_BASE = 4, 
+    NUM_FUENTES = FUENTE_SENSOR_BASE + MAX_SENSORES // 12
 };
 
 // Vocabulario de estado, es el codigo interno
@@ -25,7 +26,11 @@ typedef enum
     ESTADO_OK,  
     ESTADO_SIN_RESPUESTA, // Timeout: no contesta nada 
     ESTADO_TRAMA_INVALIDA, // contesto, CRC o longitud mal
-    ESTADO_SIN_HORA // El RTC no responde
+    ESTADO_SIN_HORA, // El RTC no responde
+    ESTADO_SD_AUSENTE, // La SD no responde (no está o mal contacto)
+    ESTADO_SD_SIN_FORMATO, // responde, pero no se puede montar (sin formato, exFAT o dañada)
+    ESTADO_SD_LLENA, // SD está llena
+    ESTADO_SD_ERROR_ESCRITURA // Estaba montada y falla al escribir
 } estado_codigo_t; 
 
 //Una fila de la tabla

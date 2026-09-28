@@ -11,6 +11,7 @@
 #include "tarea_polling.h"
 #include "tarea_rtc.h"
 #include "estado_sistema.h"
+#include "config_nodo.h"
 
 QueueHandle_t cola_lecturas;
 
@@ -18,33 +19,40 @@ static const char *TAG = "polling";
 
 void tarea_polling(void *parametros)
 {
-    cola_lecturas = xQueueCreate(10, sizeof(lectura_sensor));
+    cola_lecturas = xQueueCreate(LONGITUD_COLA_CICLOS, sizeof(ciclo));
 
     uint8_t peticion[8];
     uint8_t datos_rx[256];
     uart_event_t evento;
-    float valores[MAX_VALORES];
-    lectura_sensor lectura;
+    ciclo lectura;
 
     TickType_t proximo_ciclo = xTaskGetTickCount();
 
     while (1)
     {
+        memset(&lectura, 0, sizeof(lectura)); // Se pone al inicio todo el ciclo a 0
+
+        lectura.seq = config_nodo_siguiente_seq(); // Configuramos el numero de seq al siguiente
+
         // Se toma el valor del RTC al principio del ciclo, todos los sensores vana atener esta hora aunque hay adiferencias de tiempo entre sus tomas serán de segundos
         uint32_t ts = rtc_timestamp_pais();
         if (ts == 0)
         {
+            lectura.estado_rtc = ESTADO_SIN_HORA;
             ESP_LOGW(TAG, "Timestamp no fiable, el RTC no responde");
             estado_sistema_publicar(FUENTE_RTC, NULL, 0, 0, ESTADO_SIN_HORA);
         }
         else
         {
             estado_sistema_publicar(FUENTE_RTC, NULL, 0, ts, ESTADO_OK);
+            lectura.ts = ts;
+            lectura.estado_rtc = ESTADO_OK;
         }
 
         for (int i = 0; i <= NUM_SENSORES - 1; i++)
         {
             sensor_descrip entrada = TABLA_SENSORES[i];
+            ciclo_sensor *sensor = &lectura.sensor[i];
 
             construir_peticion(peticion, entrada.slave_id, entrada.reg_H, entrada.reg_L, entrada.num_registros);
 
@@ -64,7 +72,7 @@ void tarea_polling(void *parametros)
 
             uart_write_bytes(UART_NUM_2, peticion, 8);
 
-            lectura.valido = false;
+            bool trama_ok = false;
 
             // Llega algo
             if (xQueueReceive(uart_queue, (void *)&evento, pdMS_TO_TICKS(1000)))
@@ -87,7 +95,7 @@ void tarea_polling(void *parametros)
 
                             if (crc_calculado == crc_recibido)
                             {
-                                lectura.valido = true;
+                                trama_ok = true;
 
                                 /*Para ver por pantalla la trama que recibes
                                 for (int k = 0; k < longitud; k++)
@@ -97,36 +105,41 @@ void tarea_polling(void *parametros)
                         }
                     }
                 }
-                if (lectura.valido == true)
+                if (trama_ok == true)
                 {
-                    decodificar_datos(datos_rx, entrada.tipo, entrada.num_valores, valores);
+                    decodificar_datos(datos_rx, entrada.tipo, entrada.num_valores, sensor->valores);
 
-                    estado_sistema_publicar(FUENTE_SENSOR_BASE + i, valores, entrada.num_valores, ts, ESTADO_OK);
+                    sensor->codigo = ESTADO_OK;
+                    sensor->num_valores = entrada.num_valores; // Sirve para indicar el numero de valores válidos
 
-                    for (int j = 0; j <= entrada.num_valores - 1; j++)
-                    {
-                        strcpy(lectura.nombre, entrada.nombres_datos[j]);
-                        lectura.timestamp = ts;
-                        lectura.valor = valores[j];
-                        xQueueSend(cola_lecturas, &lectura, 0);
-                    }
+                    estado_sistema_publicar(FUENTE_SENSOR_BASE + i, sensor->valores, sensor->num_valores, ts, ESTADO_OK);
                 }
                 else // Trama corrupta llega pero hay algo mal
                 {
+                    sensor->codigo = ESTADO_TRAMA_INVALIDA;
                     ESP_LOGW(TAG, "%s: trama invalida (longitud o CRC)", entrada.nombre_fuente);
                     estado_sistema_publicar(FUENTE_SENSOR_BASE + i, NULL, 0, 0, ESTADO_TRAMA_INVALIDA);
                 }
             }
             else
             {
-                ESP_LOGW(TAG, "%s: sin respuesta en 1 s", entrada.nombre_fuente);
+                sensor->codigo = ESTADO_SIN_RESPUESTA;
+                ESP_LOGW(TAG, "%s: sin respuesta en sensor", entrada.nombre_fuente);
                 // Hay un Timeout y no llega nada y la uart no recibe nada
                 estado_sistema_publicar(FUENTE_SENSOR_BASE + i, NULL, 0, 0, ESTADO_SIN_RESPUESTA);
             }
             // Aunque la trama vaya mal tiene que haber un tiempo entre medidas para que se sepa cuando es el final
             vTaskDelay(pdMS_TO_TICKS(5));
         }
+        lectura.num_sensores = NUM_SENSORES;
+
+        if (xQueueSend(cola_lecturas, &lectura, 0) != pdPASS)
+        {
+            ESP_LOGE(TAG, "cola llena: ciclo perdido");
+        }
+
         vTaskDelayUntil(&proximo_ciclo, pdMS_TO_TICKS(PERIODO_MUESTREO_MS));
+        ESP_LOGI(TAG, "pila libre minima: %u B", (unsigned)uxTaskGetStackHighWaterMark(NULL));
     }
 }
 

@@ -4,13 +4,31 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
+#include "estado_sistema.h"
 
-#define PERIODO_MUESTREO_MS 10000
+#define PERIODO_MUESTREO_MS 20000 // periodo de la tarea
+#define LONGITUD_COLA_CICLOS 4
 
-extern QueueHandle_t uart_queue; //definida aquí pero declarada en main.c  
+extern QueueHandle_t uart_queue; // Declarada aquí pero definida en main.c
 
-void tarea_polling(void* parametros);
+typedef struct ciclo_sensor
+{
+    estado_codigo_t codigo;
+    uint8_t num_valores;
+    float valores[MAX_VALORES];
+} ciclo_sensor;
 
-QueueHandle_t get_cola_lecturas(void); 
+typedef struct ciclo
+{
+    uint32_t ts;
+    uint32_t seq;
+    estado_codigo_t estado_rtc; // OK o SIN_HORA
+    uint8_t num_sensores;
+    ciclo_sensor sensor[MAX_SENSORES];
+} ciclo;
+
+void tarea_polling(void *parametros);
+
+QueueHandle_t get_cola_lecturas(void);
 
 #endif
