@@ -1,8 +1,9 @@
 /*
  * tarea_pantalla.c
  *
- * Pinta en la OLED (128x64, fuente 5x8: 25 columnas x 8 lineas) el reloj,
- * los ultimos valores de cada sensor y su estado en lenguaje llano.
+ * Pinta en la OLED (128x64, fuente 5x8: 25 columnas x 8 lineas) el reloj
+ * con el ID del nodo, los ultimos valores de cada sensor y el estado de
+ * cada fuente en lenguaje llano.
  *
  * Los valores de un sensor averiado NO se borran: se muestran con la marca
  * "!hh:mm", que es la hora del ultimo dato bueno, para que nadie los
@@ -20,6 +21,7 @@
 
 #include "sensores.h"
 #include "estado_sistema.h"
+#include "config_nodo.h"
 #include "pantalla_oled.h"
 #include "tarea_rtc.h"
 #include "tarea_pantalla.h"
@@ -68,20 +70,23 @@ static size_t anadir(char *linea, size_t tam, size_t usado, const char *formato,
 }
 
 /**
- * @brief Lineas 0 y 1: el reloj. Comun a todas las paginas.
+ * @brief Linea 0: reloj + ID del nodo; linea 1 solo sin hora. Comun a las dos paginas.
  *
+ * "29/09 14:38:05 ID:125010" (24 columnas). Sin año: con el no cabe el ID.
  * Los segundos avanzando son el latido del sistema: si se quedan parados,
  * el firmware esta colgado.
  */
 static void pintar_reloj(void)
 {
     char linea[PANTALLA_COLUMNAS + 1];
+    char hora[15]; // "29/09 14:38:05" + '\0'
 
     uint32_t ts = rtc_timestamp_pais();
 
     if (ts == 0)
     {
-        pantalla_oled_texto(0, "-- SIN HORA --");
+        snprintf(linea, sizeof(linea), "-- SIN HORA -- ID:%s", config_nodo_id());
+        pantalla_oled_texto(0, linea);
         pantalla_oled_texto(1, "  RTC no contesta");
     }
     else
@@ -92,7 +97,8 @@ static void pintar_reloj(void)
         // ts ya lleva sumado OFFSET_PAIS_S, asi que gmtime_r da hora de Peru
         gmtime_r(&t, &local);
 
-        strftime(linea, sizeof(linea), "%Y-%m-%d %H:%M:%S", &local);
+        strftime(hora, sizeof(hora), "%d/%m %H:%M:%S", &local);
+        snprintf(linea, sizeof(linea), "%s ID:%s", hora, config_nodo_id());
 
         pantalla_oled_texto(0, linea);
     }
@@ -165,7 +171,55 @@ static void pintar_pagina_datos(void)
 }
 
 /**
- * @brief Pagina 2: estado de la red movil. Vacia hasta la fase del SIM7600.
+ * @brief Lineas 6 y 7 de la pagina 2: estado de la SD.
+ *
+ * OK:    "SD OK, guardado 14:30" (hora del ultimo guardado correcto).
+ * Fallo: "SD ERROR ESCRITURA !14:30" (25 columnas justas) y debajo la
+ *        accion. Sin ningun guardado desde el arranque, "!--:--".
+ * El porcentaje libre no se muestra: marcaria 99 % durante años.
+ */
+static void pintar_sd(void)
+{
+    char linea[PANTALLA_COLUMNAS + 1];
+    char hora[6];
+    estado_fuente_t e;
+
+    if (estado_sistema_leer(FUENTE_SD, &e) == false)
+    {
+        return;
+    }
+
+    estado_sistema_hora_legible(e.ultimo_ts_ok, hora, sizeof(hora));
+
+    if (e.codigo == ESTADO_OK)
+    {
+        snprintf(linea, sizeof(linea), "SD OK, guardado %s", hora);
+        pantalla_oled_texto(6, linea);
+        return;
+    }
+
+    // Antes del primer ciclo no hay estado: como los sensores, sin marca ni accion
+    if (e.codigo == ESTADO_SIN_DATOS)
+    {
+        snprintf(linea, sizeof(linea), "SD %s", estado_sistema_texto(e.codigo));
+        pantalla_oled_texto(6, linea);
+        return;
+    }
+
+    snprintf(linea, sizeof(linea), "SD %s !%s", estado_sistema_texto(e.codigo), hora);
+    pantalla_oled_texto(6, linea);
+
+    const char *accion = estado_sistema_accion(e.codigo);
+
+    if (accion[0] != '\0')
+    {
+        snprintf(linea, sizeof(linea), "  %s", accion);
+        pantalla_oled_texto(7, linea);
+    }
+}
+
+/**
+ * @brief Pagina 2: estado de la red movil (vacia hasta la fase del SIM7600) y de la SD.
  */
 static void pintar_pagina_red(void)
 {
@@ -173,6 +227,7 @@ static void pintar_pagina_red(void)
     estado_fuente_t e;
 
     pintar_reloj();
+    pintar_sd();
 
     if (estado_sistema_leer(FUENTE_RED, &e) == true)
     {

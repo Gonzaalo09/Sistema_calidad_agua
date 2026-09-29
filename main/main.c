@@ -161,7 +161,7 @@ void app_main(void)
     }
 
     xTaskCreate(tarea_polling, "polling", 4096, NULL, 5, NULL);
-    xTaskCreate(tarea_transmision, "transmision", 4096, NULL, 3, NULL);
+    xTaskCreate(tarea_transmision, "transmision", 6144, NULL, 3, NULL);
     xTaskCreate(tarea_rtc, "rtc_debug", 4096, NULL, 2, NULL);
     xTaskCreate(tarea_pantalla, "pantalla", 4096, NULL, 2, NULL);
 }

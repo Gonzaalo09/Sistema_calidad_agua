@@ -21,7 +21,7 @@ const sensor_descrip TABLA_SENSORES[] = {
     {.slave_id = 3, .reg_H = 0x00, .reg_L = 0x01, .num_registros = 4, .tipo = float32_CDAB, .num_valores = 2, .nombres_datos = {"OD_medida", "temperatura"}, .nombre_fuente = "OD"},
 
     // Ph Sensor
-    {.slave_id = 5, .reg_H = 0x00, .reg_L = 0x01, .num_registros = 4, .tipo = float32_CDAB, .num_valores = 2, .nombres_datos = {"pH", "temperatura"}, .nombre_fuente = "pH"},
+    {.slave_id = 5, .reg_H = 0x00, .reg_L = 0x01, .num_registros = 4, .tipo = float32_CDAB, .num_valores = 2, .nombres_datos = {"pH", "temperatura"}, .nombre_fuente = "pH"},   
 };
 
 // El compilador cuenta las entradas: no hay que tocar nada al añadir un sensor

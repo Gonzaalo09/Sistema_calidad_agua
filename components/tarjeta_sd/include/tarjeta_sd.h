@@ -1,15 +1,17 @@
-    #ifndef TARJETA_SD_H
+#ifndef TARJETA_SD_H
 #define TARJETA_SD_H
 
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 typedef enum
 {
     SD_EST_OK = 0,
     SD_EST_AUSENTE,         // la tarjeta no responde (no esta o mal contacto)
     SD_EST_SIN_FORMATO,     // responde, pero no se puede montar (sin formato, exFAT o dañada)
-    SD_EST_LLENA,           // sin espacio (se usara en el paso 5)
-    SD_EST_ERROR_ESCRITURA, // estaba montada y fallo al escribir o al releer
+    SD_EST_LLENA,           // queda menos de SD_MIN_LIBRE_BYTES
+    SD_EST_ERROR_ESCRITURA, // estaba montada y fallo al escribir o al leer
     SD_EST_ERROR_BUS        // no se pudo inicializar el bus SPI (pines o configuracion)
 } sd_estado_t;
 
@@ -37,16 +39,30 @@ void tarjeta_sd_desmontar(void);
 bool tarjeta_sd_montada(void);
 
 /**
- * @brief Bring-up: imprime los datos de la tarjeta, capacidad, espacio libre
- *        y el contenido de la raiz.
+ * @brief Imprime datos de la tarjeta, capacidad, espacio libre y la raiz.
  */
 void tarjeta_sd_info(void);
 
 /**
- * @brief PROVISIONAL (paso 4): monta si hace falta, añade una linea a
- *        PRUEBA.TXT, la relee y la compara. Si falla, desmonta.
+ * @brief Lee la primera linea de un archivo (ruta relativa a la tarjeta).
+ *        Monta la tarjeta si hace falta.
+ * @param existe Sale a false si el archivo no existe (buf queda vacio)
  * @return SD_EST_OK o el fallo encontrado
  */
-sd_estado_t tarjeta_sd_prueba_escritura(void);
+sd_estado_t tarjeta_sd_primera_linea(const char *ruta, char *buf, size_t tam, bool *existe);
+
+/**
+ * @brief Añade una linea al final de un archivo (ruta relativa a la tarjeta).
+ *        Si el archivo no existe lo crea, con su carpeta, y escribe antes la
+ *        cabecera. Abre, escribe y cierra: el archivo nunca queda abierto.
+ * @return SD_EST_OK o el fallo encontrado
+ */
+sd_estado_t tarjeta_sd_escribir_linea(const char *ruta, const char *cabecera, const char *linea);
+
+/**
+ * @brief Porcentaje de espacio libre (0-100).
+ * @return SD_EST_OK, o SD_EST_AUSENTE si no esta montada
+ */
+sd_estado_t tarjeta_sd_espacio(uint8_t *porcentaje_libre);
 
 #endif
