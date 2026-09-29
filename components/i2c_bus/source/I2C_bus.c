@@ -3,8 +3,8 @@
 
 #include "I2C_bus.h"
 
-#define I2C_SDA_IO  GPIO_NUM_21
-#define I2C_SCL_IO  GPIO_NUM_22
+#define I2C_SDA_IO  GPIO_NUM_21 // Para la 7000G son los mismos
+#define I2C_SCL_IO  GPIO_NUM_22 // Para la 7000G son los mismos
 #define PROBE_TIMEOUT_MS 10
 
 static const char *TAG = "I2C_bus";

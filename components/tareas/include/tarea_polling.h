@@ -4,10 +4,13 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
+#include "driver/uart.h"
 #include "estado_sistema.h"
 
 #define PERIODO_MUESTREO_MS 20000 // periodo de la tarea
 #define LONGITUD_COLA_CICLOS 4
+
+#define RS485_UART UART_NUM_2 // UART del bus Modbus: la configura main.c y la usa tarea_polling.c
 
 extern QueueHandle_t uart_queue; // Declarada aquí pero definida en main.c
 

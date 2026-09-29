@@ -3,6 +3,9 @@
 
 #include <stdio.h>
 
+// Peticion de lectura 0x03: esclavo(1) + funcion(1) + registro(2) + cantidad(2) + CRC(2)
+#define MODBUS_TAM_PETICION 8
+
 /**
  * @brief Formato en el que un sensor codifica sus registros Modbus.
  */
@@ -28,7 +31,7 @@ uint16_t calcular_crc16(uint8_t *buffer, uint16_t longitud);
  *        holding registers") y le añade su CRC16 al final.
  *
  * @param[out] peticion_out  Buffer ya reservado por quien llama, de al
- *                           menos 8 bytes, donde se escribe la trama
+ *                           menos MODBUS_TAM_PETICION bytes, donde se escribe la trama
  *                           completa (incluido el CRC).
  * @param id_esclavo         Dirección del esclavo Modbus (slave ID).
  * @param addres_H           Byte alto de la dirección del primer registro a leer.

@@ -15,36 +15,69 @@ un ordenador**, mirando la pantalla del nodo o los datos transmitidos.
 
 | Fase | Estado |
 |---|---|
-| 1. Modbus RTU con un sensor | Validada en hardware |
-| 2. Tabla de sensores y tareas FreeRTOS | Validada en hardware |
-| 3. Bus I2C y RTC DS3231 | Validada en hardware |
-| 4a. Bring-up de la pantalla OLED | Validada en hardware |
-| 4b. Tabla de estado y pantallas de diagnóstico | Validada en hardware |
-| 5. Transmisión remota (SIM7600G) | Pendiente (siguiente) |
-| 6. Almacenamiento en microSD | Validada en hardware |
+| 1. Modbus RTU con un sensor | Validada en hardware (DevKit) |
+| 2. Tabla de sensores y tareas FreeRTOS | Validada en hardware (DevKit) |
+| 3. Bus I2C y RTC DS3231 | Validada en hardware (DevKit) |
+| 4a. Bring-up de la pantalla OLED | Validada en hardware (DevKit) |
+| 4b. Tabla de estado y pantallas de diagnóstico | Validada en hardware (DevKit) |
+| Migración a la LilyGo T-SIM7000G (sin transmisión) | Pendiente (siguiente) |
+| 5. Transmisión remota (SIM7000G por LTE-M; después SIM7600G) | Pendiente |
+| 6. Almacenamiento en microSD | Validada en hardware (DevKit) |
 | 7. Gestión de energía (deep sleep, solar) | Pendiente |
 | 8. Sincronización temporal (GNSS/NTP) | Pendiente |
 
-Última validación (29/09/2026): cada ciclo de medida se guarda como una
-línea en un archivo CSV por día en la microSD, que se abre en Excel. El
-archivo continúa tras un reinicio, se abre uno nuevo si cambian los
-sensores, las medidas sin hora van a un archivo aparte, y al sacar y volver
-a meter la tarjeta el nodo sigue escribiendo solo. La pantalla muestra el
-ID del nodo junto al reloj y el estado de la tarjeta con la hora del último
-guardado.
+Última validación (29/09/2026, en el DevKit): cada ciclo de medida se
+guarda como una línea en un archivo CSV por día en la microSD, que se abre
+en Excel. El archivo continúa tras un reinicio, se abre uno nuevo si
+cambian los sensores, las medidas sin hora van a un archivo aparte, y al
+sacar y volver a meter la tarjeta el nodo sigue escribiendo solo. La
+pantalla muestra el ID del nodo junto al reloj y el estado de la tarjeta
+con la hora del último guardado.
 
 ## Hardware
 
+### Placas
+
+| Etapa | Placa | Módulo | Módem |
+|---|---|---|---|
+| Fases 1–4 y 6 | ESP32-WROOM-32 DevKit, 30 pines | WROOM-32 | — |
+| **Actual** | **LilyGo T-SIM7000G** | ESP32-WROVER-B (4 MB flash, 8 MB PSRAM) | SIM7000G (LTE-M, NB-IoT, GPRS/EDGE, GNSS) |
+| Destino final | LilyGo T-SIM7600G | ESP32-WROVER-E | SIM7600G |
+
+**El firmware actual, incluida la parte del módem (SIM), está hecho para
+la T-SIM7000G.** No compila tal cual para el DevKit ni para la T-SIM7600G.
+Cuando el nodo funcione y esté comprobado en campo, se separará lo que
+depende de la placa y del módem para que pasar a la T-SIM7600G sea más
+sencillo. Hasta entonces, cambiar de placa exige revisar a mano los pines
+de `main.c` y `tarjeta_sd.c` y reescribir la parte del módem.
+
+### Elementos
+
 | Elemento | Detalle |
 |---|---|
-| MCU (desarrollo) | ESP32-WROOM-32 DevKit, 30 pines |
-| MCU (destino) | LilyGo T-SIM7600G (ESP32-WROVER-E) |
-| RS-485 | Módulo RS485-TTL con auto-dirección. UART2, TX=GPIO17, RX=GPIO16, 9600 8N1 |
-| Bus I2C | I2C_NUM_0, SDA=GPIO21, SCL=GPIO22 |
+| RS-485 | Módulo RS485-TTL con auto-dirección, alimentado a 3,3 V. UART2 a 9600 8N1. DevKit: TX=GPIO17, RX=GPIO16. **T-SIM7000G: TX=GPIO18, RX=GPIO19** (16 y 17 están ocupados por la PSRAM del WROVER). Los pines `TX`/`RX` del header son la consola (UART0): no conectar ahí el RS-485 |
+| Módem (T-SIM7000G, fase 5) | SIM7000G por UART1: TX del ESP32=GPIO27, RX=GPIO26; encendido (PWRKEY) por GPIO4. No conectar nada a los pines 4 y 25 del header |
+| Bus I2C | I2C_NUM_0, SDA=GPIO21, SCL=GPIO22 (igual en las dos placas) |
 | RTC | DS3231 (0x68) con pila CR2032, 3,3 V. EEPROM 24C32 del módulo en 0x57 |
 | OLED | SSD1306 128×64 de 0,96" (0x3C), 3,3 V |
-| Sensores | NPK (JXCT JXBS-3001-NPK-RS, mg/kg), oxígeno disuelto (REMOND, mg/L) y pH (REMOND). 12 V comunes, GND común con el ESP32 |
-| MicroSD | Módulo "Micro SD Card Adapter" por SPI (VSPI): CS=GPIO5, SCK=GPIO18, MOSI=GPIO23, MISO=GPIO19, a 5 MHz. **VCC al pin VIN (5 V), no a 3V3.** Tarjeta SanDisk Ultra 16 GB en FAT32 |
+| Sensores | NPK (JXCT JXBS-3001-NPK-RS, mg/kg), oxígeno disuelto (REMOND, mg/L) y pH (REMOND). 12 V comunes de una fuente externa, GND común con la placa |
+| MicroSD (DevKit) | Módulo "Micro SD Card Adapter" por SPI (VSPI): CS=GPIO5, SCK=GPIO18, MOSI=GPIO23, MISO=GPIO19, a 5 MHz. **VCC al pin VIN (5 V), no a 3V3** |
+| MicroSD (T-SIM7000G) | Slot de la placa: CS=GPIO13, SCK=GPIO14, MOSI=GPIO15, MISO=GPIO2. El módulo externo no se usa. Los pines `SCLK`/`MISO`/`MOSI`/`CS` del header (18/19/23/5) **no** son el slot |
+| Tarjeta | SanDisk Ultra 16 GB en FAT32 |
+
+### Alimentación de la T-SIM7000G
+
+- Se alimenta por USB-C (5 V), por la batería 18650 del portapilas o por
+  el pin VBAT. El pin VBUS del header es la misma línea que el USB-C: solo
+  tiene 5 V con el USB conectado. **Con batería sola no hay 5 V en ningún
+  pin**: OLED, RTC y módulo RS-485 van al pin 3V3 de la placa.
+- El conector solar (panel de 5–6 V) **solo carga la batería** (máx.
+  500 mA). Sin batería, el panel no enciende la placa.
+- Al conectar la batería por primera vez, pulsar el botón PWR para
+  activarla.
+- La placa puede reiniciarse al conectar o desconectar el USB con la
+  batería puesta. Es normal (no hay conmutación sin cortes).
+- Los sensores siguen a 12 V con su propia fuente. GND común con la placa.
 
 ## Arquitectura
 
@@ -161,19 +194,59 @@ usando la configuración regional Inglés (Estados Unidos)).
 - Sacar y meter la tarjeta **con el nodo sin alimentación**. Si se saca en
   marcha, el nodo lo detecta y la vuelve a montar al meterla, pero se
   arriesga a cortar una escritura a medias.
-- El módulo lector de desarrollo se alimenta del pin **VIN** del DevKit
-  (5 V). Con 3,3 V su regulador no da suficiente tensión a la tarjeta.
+- **T-SIM7000G: sacar la tarjeta antes de grabar el firmware.** Con la
+  tarjeta puesta, el ordenador puede no conseguir grabar la placa.
+- DevKit: el módulo lector se alimenta del pin **VIN** (5 V). Con 3,3 V su
+  regulador no da suficiente tensión a la tarjeta.
+
+## Conectar la placa al ordenador (una vez por PC)
+
+El ESP32 no habla USB directamente: entre el USB-C y el ESP32 hay un chip
+puente USB-serie. Windows necesita el driver de ese chip para crear un
+puerto COM, y sin puerto COM no se puede grabar ni ver el log.
+
+| Revisión de la T-SIM7000G | Chip puente | Driver |
+|---|---|---|
+| V1.6 (serigrafía "20-4-15", la de desarrollo) | CP2104 (Silicon Labs) | *CP210x Universal Windows Driver*, de la web de Silicon Labs |
+| Revisiones posteriores | CH9102 (WCH) | *CH343SER*, de la web de WCH |
+
+1. Conectar la placa con un cable **USB-A a USB-C** que transmita datos.
+   Muchos cables solo cargan: la placa enciende (LED verde) pero el PC no
+   la ve. LilyGo desaconseja los cables USB-C a USB-C.
+2. Abrir el **Administrador de dispositivos** de Windows y desplegar
+   **Puertos (COM y LPT)**.
+   - Si aparece "Silicon Labs CP210x USB to UART Bridge (COMx)" o
+     "USB-Enhanced-SERIAL CH9102 (COMx)", el driver ya está: ir al
+     paso 4.
+   - Si no aparece, desplegar **Otros dispositivos**. Si la placa está
+     ahí con un triángulo amarillo, falta el driver: paso 3.
+   - Si no aparece en ningún sitio, desenchufar y enchufar mirando qué
+     entrada aparece y desaparece. Si no cambia nada, el problema es el
+     cable o el puerto USB, no el driver.
+3. Instalar el driver de la tabla: descomprimirlo, clic derecho sobre el
+   archivo `.inf` → **Instalar**, y volver a conectar la placa.
+4. Apuntar el número de COM. Es el que se pone en `-p COMx` en los
+   comandos y en `.vscode/settings.json` (o con el botón de puerto de la
+   extensión ESP-IDF de VS Code). En el PC de desarrollo, la T-SIM7000G es
+   **COM4**.
+
+El número de COM lo asigna Windows y puede cambiar de un PC a otro, o si
+se conecta la placa en otro puerto USB.
 
 ## Preparar un nodo antes de llevarlo al campo
 
+En los comandos, `COMx` es el puerto de la placa (ver "Conectar la placa
+al ordenador").
+
 1. **Poner en hora el RTC** (si es un RTC nuevo o se ha quedado sin pila):
    ver "Primera puesta en hora del RTC" en Compilación.
-2. **Borrar la memoria del ESP32 y grabar el firmware definitivo**, para
-   que el contador de ciclos `seq` empiece en 1 y no arrastre los números
-   de las pruebas:
+2. **Sacar la microSD** (T-SIM7000G), **borrar la memoria del ESP32 y
+   grabar el firmware definitivo**, para que el contador de ciclos `seq`
+   empiece en 1 y no arrastre los números de las pruebas ni datos del
+   firmware de fábrica:
    ```
-   idf.py -p COM4 erase-flash
-   idf.py -p COM4 flash
+   idf.py -p COMx erase-flash
+   idf.py -p COMx flash
    ```
    Esto no borra la hora (la guarda el RTC con su pila) ni cambia el ID del
    nodo (viene del chip).
@@ -182,13 +255,14 @@ usando la configuración regional Inglés (Estados Unidos)).
    pantalla. Son 6 letras y números sacados del propio chip: no se
    configura y no se repite entre nodos. Si se cambia la placa de un nodo,
    la placa nueva trae un ID nuevo y hay que actualizar la etiqueta.
-4. **Formatear la tarjeta microSD** en FAT32 (ver arriba).
+4. **Formatear la tarjeta microSD** en FAT32 (ver arriba) y volver a
+   meterla.
 5. Si el nodo va a **otro país que no sea Perú**, hacer antes los cambios
    de "Desplegar en otro país".
 
 **Una vez desplegado, no volver a usar `erase-flash` en ese nodo**: el
 contador `seq` volvería a 1 y el servidor recibiría números repetidos.
-Para actualizar el firmware basta con `idf.py -p COM4 flash`, que no borra
+Para actualizar el firmware basta con `idf.py -p COMx flash`, que no borra
 el contador.
 
 ## Desplegar en otro país
@@ -202,7 +276,7 @@ proyecto algo más que dependa del país, se apunta aquí.
 | Desfase horario del país | Firmware: `OFFSET_PAIS_S` en `tarea_rtc.h` (componente `tareas`) | Horas respecto a UTC × 3600, con signo. Perú (UTC−5): `(-5 * 3600)`. Ejemplo, Bolivia (UTC−4): `(-4 * 3600)` |
 | El mismo desfase en el servidor | Servidor: campo `desfase_s` del nodo en la tabla de nodos | El mismo valor en segundos (Perú: `-18000`). Si no coincide con el del firmware, el servidor calculará mal la hora de todas las medidas de ese nodo |
 | Puesta en hora del RTC | PC con el que se compila con `FORZAR_HORA 1` | Toma la hora del PC y le resta `OFFSET_PAIS_S`: el reloj del PC tiene que estar en la hora del país de destino al compilar |
-| Red móvil | Tarjeta SIM y firmware (fase 5, aún sin implementar) | SIM de un operador local, con su APN, usuario y contraseña. Comprobar que el SIM7600G admite las bandas de ese operador (sin verificar) |
+| Red móvil | Tarjeta SIM y firmware (fase 5, aún sin implementar) | SIM de un operador local, con su APN, usuario y contraseña. Comprobar que el operador ofrece LTE-M en la zona y que el módem de la placa admite sus bandas: SIM7000G Cat-M1 en B1/B2/B3/B4/B5/B8/B12/B13/B18/B19/B20/B26/B28/B39 (SIMCom, Hardware Design V1.07); SIM7600G, sin verificar. Cobertura LTE-M en Perú: sin verificar |
 | Idioma de la pantalla | Firmware: `estado_sistema.c` (`estado_sistema_texto`, `estado_sistema_accion`) y `tarea_pantalla.c` | Los mensajes están en español. Cada acción cabe en 23 caracteres. La fuente admite acentos y ñ (Latin-1), no otros alfabetos |
 
 **Limitación: solo países sin horario de verano.** El desfase es fijo. En
@@ -211,7 +285,7 @@ las medidas quedarían con una hora de error durante la mitad del año. Para
 esos países hace falta un cambio de diseño en el firmware, todavía no
 hecho.
 
-Después de cambiar el firmware, grabar con `idf.py -p COM4 flash`. Si el
+Después de cambiar el firmware, grabar con `idf.py -p COMx flash`. Si el
 nodo es nuevo, seguir "Preparar un nodo antes de llevarlo al campo"
 completo.
 
@@ -257,19 +331,46 @@ servidor y revisar la puesta en hora.
 
 ## Compilación
 
-Proyecto estándar ESP-IDF v6.1. Desde un entorno ESP-IDF:
+Proyecto estándar ESP-IDF v6.1 (target `esp32`, el mismo en las dos
+placas). Desde un entorno ESP-IDF:
 
 ```
 idf.py build
-idf.py -p COM4 flash monitor
+idf.py -p COMx flash monitor
 ```
 
 Tras añadir un componente nuevo, ejecutar antes `idf.py reconfigure`.
+
+### Configuración del proyecto (menuconfig)
+
+La configuración de ESP-IDF está guardada en el archivo `sdkconfig` del
+proyecto, que va en el repositorio: quien clona el proyecto ya la tiene y
+no necesita abrir menuconfig. Esta tabla dice qué opciones necesita el
+nodo y por qué, para comprobarlas si se regenera `sdkconfig` o se cambia de
+placa.
+
+menuconfig se abre en el ordenador, **sin la placa conectada**: edita
+`sdkconfig`, y los cambios llegan a la placa al compilar y grabar.
+Se abre con `idf.py menuconfig` (o el icono de engranaje "SDK
+Configuration Editor" de la extensión ESP-IDF). Se navega con las flechas,
+`S` guarda y `Q` sale. Después, `idf.py build`.
+
+| Opción (ruta en menuconfig) | Valor | Por qué |
+|---|---|---|
+| Serial flasher config → Flash size | **4 MB** | Es la flash real del ESP32-WROVER-B (y del DevKit). Con 2 MB el firmware funciona, pero ESP-IDF avisa al arrancar y solo usa la mitad |
+| Partition Table | **No cambiar** | Si se mueve la partición `nvs`, el nodo pierde el contador `seq` |
+| Component config → Hardware Settings → Chip revision → Minimum Supported ESP32 Revision | **Rev v0.0** (por defecto) | El WROVER-B lleva un chip de revisión antigua. Con un mínimo mayor (p. ej. v3.0), el bootloader se niega a arrancar (`Image requires chip rev >= v3.0`) |
+| Component config → ESP PSRAM → Support for external, SPI-connected RAM | **Desactivada** (por defecto) | El firmware no necesita la RAM externa. Pendiente de decisión definitiva |
+| Component config → FAT Filesystem support → Long filename support | **Activada** (cualquier modo salvo "No long filenames") | Los archivos de la SD tienen nombres largos (`125010_2026-09-29.csv`). Sin esto no se pueden crear |
 
 Primera puesta en hora del RTC: compilar con `FORZAR_HORA 1` en `main.c`,
 comprobar la hora en el log, y volver a compilar con `FORZAR_HORA 0` para
 que los siguientes arranques conserven la hora. El PC que compila debe
 estar en la zona horaria del país de despliegue.
+
+Si la T-SIM7000G no entra en modo de grabación (y la microSD ya está
+fuera): unir IO0 con GND con un cable, pulsar RST, soltarlo, quitar el
+cable y grabar.
 
 ## Limitaciones conocidas
 
@@ -284,7 +385,8 @@ estar en la zona horaria del país de despliegue.
   cualquier corte de alimentación antes de dar medidas fiables.
 - El NPK tarda hasta 10 s en estabilizarse al alimentarlo: la primera
   lectura después de conectarlo no es fiable.
-- GPIO16/17 están reservados a la PSRAM en el WROVER-E: hay que reasignar
-  UART2 al migrar al LilyGo.
+- GPIO16/17 están conectados a la PSRAM en el ESP32-WROVER-B (T-SIM7000G)
+  y en el WROVER-E (T-SIM7600G): en las LilyGo el UART2 del RS-485 va por
+  los GPIO18 (TX) y 19 (RX).
 - El desfase horario es fijo: el nodo no sirve tal cual en países con
   horario de verano (ver "Desplegar en otro país").

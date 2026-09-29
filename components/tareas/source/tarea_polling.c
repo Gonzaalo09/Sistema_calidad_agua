@@ -13,6 +13,9 @@
 #include "estado_sistema.h"
 #include "config_nodo.h"
 
+#define TIMEOUT_RESPUESTA_MS 1000   // espera maxima a que un sensor empiece a contestar
+#define TIMEOUT_LECTURA_UART_MS 100 // espera maxima al leer los bytes ya recibidos
+
 QueueHandle_t cola_lecturas;
 
 static const char *TAG = "polling";
@@ -21,7 +24,7 @@ void tarea_polling(void *parametros)
 {
     cola_lecturas = xQueueCreate(LONGITUD_COLA_CICLOS, sizeof(ciclo));
 
-    uint8_t peticion[8];
+    uint8_t peticion[MODBUS_TAM_PETICION];
     uint8_t datos_rx[256];
     uart_event_t evento;
     ciclo lectura;
@@ -59,32 +62,32 @@ void tarea_polling(void *parametros)
             // Cada intercambio empieza limpio: se descartan bytes sobrantes de la
             // peticion anterior y los eventos que ya no corresponden a nada.
             // uart_flush_input no vacia la cola de eventos, hay que hacerlo aparte.
-            uart_flush_input(UART_NUM_2);
+            uart_flush_input(RS485_UART);
             xQueueReset(uart_queue);
 
             // Para ver por pantalla la trama que estás enviando
-            /* for (int j = 0; j < 8; j++)
+            /* for (int j = 0; j < MODBUS_TAM_PETICION; j++)
              {
                  printf("%02X ", peticion[j]);
              }
              printf("\n");
              */
 
-            uart_write_bytes(UART_NUM_2, peticion, 8);
+            uart_write_bytes(RS485_UART, peticion, MODBUS_TAM_PETICION);
 
             bool trama_ok = false;
 
             // Llega algo
-            if (xQueueReceive(uart_queue, (void *)&evento, pdMS_TO_TICKS(1000)))
+            if (xQueueReceive(uart_queue, (void *)&evento, pdMS_TO_TICKS(TIMEOUT_RESPUESTA_MS)))
             {
                 if (evento.type == UART_DATA)
                 {
                     size_t longitud = 0;
-                    uart_get_buffered_data_len(UART_NUM_2, &longitud);
+                    uart_get_buffered_data_len(RS485_UART, &longitud);
 
                     if (longitud > 0)
                     {
-                        longitud = uart_read_bytes(UART_NUM_2, datos_rx, longitud, 100 / portTICK_PERIOD_MS);
+                        longitud = uart_read_bytes(RS485_UART, datos_rx, longitud, pdMS_TO_TICKS(TIMEOUT_LECTURA_UART_MS));
                         // Depende del número de registros (2bytes por cada registro)
                         size_t longitud_esperada = 5 + entrada.num_registros * 2;
 
