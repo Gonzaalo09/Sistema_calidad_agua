@@ -20,6 +20,7 @@
 #include "tarea_pantalla.h"
 #include "config_nodo.h"
 #include "tarjeta_sd.h"
+#include "modem.h"
 
 static const char *TAG = "main";
 
@@ -27,8 +28,8 @@ const int uart_buffer_size = 256;
 QueueHandle_t uart_queue;
 
 // Pines de UART2 hacia el modulo RS485-TTL, vistos desde el ESP32.
-#define RS485_PIN_TX 17 // sale del ESP32 hacia el modulo
-#define RS485_PIN_RX 16 // entra al ESP32 desde el modulo
+#define RS485_PIN_TX 19 // sale del ESP32 hacia el modulo
+#define RS485_PIN_RX 18 // entra al ESP32 desde el modulo
 #define RS485_BAUDIOS 9600        // tiene que coincidir con la de todos los sensores del bus
 #define RS485_TAM_COLA_EVENTOS 10 // eventos de la UART pendientes (uart_queue)
 
@@ -164,6 +165,12 @@ void app_main(void)
     else
     {
         ESP_LOGW(TAG, "SD no disponible al arrancar (%d)", est_sd);
+    }
+
+    
+    if (modem_init() != MODEM_OK)
+    {
+        ESP_LOGE(TAG, "Fallo configurando el UART1 o el PWRKEY del modem");
     }
 
     xTaskCreate(tarea_polling, "polling", 4096, NULL, 5, NULL);

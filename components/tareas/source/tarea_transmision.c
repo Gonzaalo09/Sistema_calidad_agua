@@ -13,10 +13,52 @@
 #include "config_nodo.h"
 #include "tarjeta_sd.h"
 #include "registro_csv.h"
+#include "modem.h"
 
 #define MAX_ARCHIVOS_DIA 9 // _2 .. _9 si cambian los sensores el mismo dia
+#define TAM_RESP_MODEM 256 // criterio: la respuesta mas larga de 5.1 (AT+CGMR) son decenas de bytes
 
 static const char *TAG = "transmision";
+
+/**
+ * @brief Un comando del bring-up con su timeout.
+ */
+typedef struct
+{
+    const char *cmd;
+    uint32_t timeout_ms;
+} comando_bringup;
+
+// Andamiaje del paso 5.1: todos de lectura salvo ATE0 y CMEE, que son NO_SAVE
+// (manual 1.7.1) y no tocan la NVRAM del modem.
+// Los timeouts de CFUN y CPIN son el "Max Response Time" del AT Command Manual
+// V1.05; los 2000 del resto son provisionales (su campo es "-" en el manual) y
+// se ajustan con lo que se mida: decision pendiente 5.
+// RESPUESTAS: respuestas_at.txt
+static const comando_bringup BRINGUP[] = {
+    {"ATE0", 2000},      // Apaga el eco de los comandos
+    {"AT+CMEE=1", 2000}, // Cambia el formato de los mensajes de error a errores numericos
+    //{"AT+CGMR", 2000},      // version de firmware
+    //{"AT+CGSN", 2000},      // IMEI número de serie único global de tu módulo de radio
+    //{"AT+IPR?", 2000},      // velocidad de baudios en el que esta: 0 = autobaud
+    {"AT+CSCLK?", 2000},    // 1 = el modem puede dormirse por DTR
+    {"AT+CFUN?", 10000},    // 1 = RF activa (manual 3.2.19)
+    {"AT+CNMP?", 2000},     // tecnologias permitidas (manual 5.2.17)
+    {"AT+CMNB?", 2000},     // Cat-M1 / NB-IoT (manual 5.2.18)
+    {"AT+CBANDCFG?", 2000}, // bandas Cat-M habilitadas (manual 5.2.29)
+    //{"AT+CPIN?", 5000},     // estado de la SIM (manual 3.2.11)
+    {"AT+CCID", 2000},
+    //{"AT+CPSI?", 2000},
+};
+#define NUM_BRINGUP (sizeof(BRINGUP) / sizeof(BRINGUP[0]))
+
+// Se leen una vez registrado
+static const comando_bringup RED[] = {
+    {"AT+CPSI?", MODEM_TIMEOUT_LECTURA_MS}, // tecnologia, MCC-MNC, banda, RSRP/RSRQ/SNR (manual 5.2.21)
+    {"AT+COPS?", MODEM_TIMEOUT_LECTURA_MS}, // operador (manual 3.2.9): list of quadruplets, each representing an operator present inthe network. 
+    {"AT+CSQ", MODEM_TIMEOUT_LECTURA_MS},   // rssi 0-31, 99 = desconocido (manual 3.2.16)
+};
+#define NUM_RED (sizeof(RED) / sizeof(RED[0]))
 
 /**
  * @brief Traduccion del estado del driver de la SD al codigo de estado_sistema.
@@ -173,6 +215,136 @@ static void publicar_sd(sd_estado_t est, uint32_t ts)
         estado_sistema_publicar(FUENTE_SD, NULL, 0, ts, ESTADO_OK);
     }
 }
+static int leer_stat(const char *cmd, const char *prefijo, char *resp, size_t tam)
+{
+    const char *p;
+    int n;
+    int stat;
+
+    if (modem_comando(cmd, resp, tam, MODEM_TIMEOUT_LECTURA_MS) != MODEM_OK)
+    {
+        return STAT_SIN_LEER;
+    }
+
+    // Prefijo en el caso de ejemplo: \r\n+CEREG:
+    // Busca donde empieza el prefijo dentro de la respuesta del modem, porque es desde donde quieres leer
+    p = strstr(resp, prefijo);
+    // resp = "\r\n+CEREG: 0,2\r\n\r\nOK\r\n
+    if (p == NULL)
+    {
+        return STAT_SIN_LEER;
+    }
+
+    if (sscanf(p + strlen(prefijo), "%d,%d", &n, &stat) != 2) // %d se salta el espacio de "+CEREG: "
+    {
+        return STAT_SIN_LEER;
+    }
+    return stat;
+}
+
+static bool esperar_registro(char *resp, size_t tam)
+{
+    uint32_t t0 = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
+    uint32_t transcurrido = 0;
+    int state_lte;
+    int state_gsm;
+    int ultimo_lte = STAT_SIN_LEER;
+    int ultimo_gsm = STAT_SIN_LEER;
+    bool registrado = false;
+
+    // Para hacer que no te salgan todos los mensajes
+    esp_log_level_set("modem", ESP_LOG_WARN);
+
+    while (transcurrido < MODEM_TIMEOUT_REGISTRO_MS)
+    {
+        state_lte = leer_stat("AT+CEREG?", "+CEREG:", resp, tam);  // registro LTE: Cat-M o NB-IoT
+        state_gsm = leer_stat("AT+CGREG?", "+CGREG:", resp, tam); // registro de paquetes en GSM (CNMP=2)
+        transcurrido = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS) - t0;
+
+        if ((state_lte != ultimo_lte) || (state_gsm != ultimo_gsm))
+        {
+            ESP_LOGI(TAG, "%lu ms: CEREG %d, CGREG %d", transcurrido, state_lte, state_gsm);
+            ultimo_lte = state_lte;
+            ultimo_gsm = state_gsm;
+        }
+
+        if ((state_lte == STAT_REG_CASA) || (state_lte == STAT_REG_ROAMING) || (state_gsm == STAT_REG_CASA) || (state_gsm == STAT_REG_ROAMING))
+        {
+            registrado = true;
+            break;
+        }
+
+        if ((state_lte == STAT_DENEGADO) && (state_gsm == STAT_DENEGADO))
+        {
+            break;
+            // Si se niegan las dos no hay nad que hacer se sale del bucle
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(MODEM_SONDEO_REGISTRO_MS));
+    }
+
+    esp_log_level_set("modem", ESP_LOG_INFO); // un unico punto de salida para restaurarlo siempre
+
+    if (registrado)
+    {
+        ESP_LOGI(TAG, "registrado a los %lu ms (CEREG %d, CGREG %d)", transcurrido, state_lte, state_gsm);
+    }
+    else
+    {
+        ESP_LOGW(TAG, "sin red tras %lu ms (CEREG %d, CGREG %d)", transcurrido, state_lte, state_gsm);
+    }
+    return registrado;
+}
+
+/**
+ * @brief Andamiaje del paso 5.1: enciende el modem, recorre los comandos de
+ *        lectura y lo apaga. El detalle de cada respuesta lo deja en el log el
+ *        propio componente del modem; aqui solo queda el veredicto.
+ */
+static void bringup_modem(void)
+{
+    static char resp[TAM_RESP_MODEM]; // static: fuera de la pila de la tarea
+    unsigned fallos = 0;
+
+    if (modem_encender() != MODEM_OK)
+    {
+        ESP_LOGE(TAG, "El modem no responde: se sigue sin transmision");
+        return;
+    }
+
+    for (size_t i = 0; i < NUM_BRINGUP; i++)
+    {
+        if (modem_comando(BRINGUP[i].cmd, resp, sizeof(resp), BRINGUP[i].timeout_ms) != MODEM_OK)
+        {
+            fallos++;
+        }
+    }
+
+    if (fallos > 0)
+    {
+        ESP_LOGW(TAG, "Bring-up: %u de %u comandos fallaron", fallos, (unsigned)NUM_BRINGUP);
+    }
+
+    if ((modem_comando("AT+CPIN?", resp, sizeof(resp), MODEM_TIMEOUT_CPIN_MS) == MODEM_OK) && (strstr(resp, "+CPIN: READY") != NULL))
+    {
+        if (esperar_registro(resp, sizeof(resp)) == true)
+        {
+            for (size_t i = 0; i < NUM_RED; i++)
+            {
+                modem_comando(RED[i].cmd, resp, sizeof(resp), RED[i].timeout_ms);
+            }
+        }
+    }
+    else
+    {
+        ESP_LOGW(TAG, "SIM no lista: no se intenta el registro");
+    }
+
+    if (modem_apagar() != MODEM_OK)
+    {
+        ESP_LOGW(TAG, "El modem no confirmo el apagado");
+    }
+}
 
 void tarea_transmision(void *parametros)
 {
@@ -186,6 +358,7 @@ void tarea_transmision(void *parametros)
         ESP_LOGE(TAG, "Cabecera CSV demasiado larga: no se guardara nada en la SD");
     }
 
+    bringup_modem();
     while (1)
     {
         xQueueReceive(get_cola_lecturas(), &lectura, portMAX_DELAY);

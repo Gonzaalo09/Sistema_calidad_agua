@@ -1,0 +1,19 @@
+AT+CMEE=1	OK	Los errores llegan como +CME ERROR: <número> en vez de ERROR a secas
+
+AT+CGMR	Revision:1529B08SIM7000G	Versión del firmware del módem
+
+AT+CGSN	<IMEI de la placa>	IMEI: identificador único del módem, 15 dígitos
+
+AT+IPR?	+IPR: 0	Velocidad en autobaud: el módem se adapta a la velocidad del que le habla
+
+AT+CSCLK?	+CSCLK: 0	El modo sueño controlado por DTR está desactivado
+
+AT+CFUN?	+CFUN: 1	Funcionalidad completa: la radio está encendida
+
+AT+CNMP?	+CNMP: 2	Modo automático: puede usar GSM (2G) y LTE
+
+AT+CMNB?	+CMNB: 3	Dentro de LTE, acepta Cat-M1 y NB-IoT
+
+AT+CBANDCFG?	Cat-M: 1,2,3,4,5,8,12,13,18,19,20,26,28,39. NB-IoT: 8 Bandas habilitadas en cada modo
+
+AT+CPIN?	+CPIN: READY Hay una SIM puesta, el módem la lee, y no pide PIN

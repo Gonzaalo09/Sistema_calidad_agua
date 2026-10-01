@@ -20,8 +20,8 @@ un ordenador**, mirando la pantalla del nodo o los datos transmitidos.
 | 3. Bus I2C y RTC DS3231 | Validada en hardware (DevKit) |
 | 4a. Bring-up de la pantalla OLED | Validada en hardware (DevKit) |
 | 4b. Tabla de estado y pantallas de diagnóstico | Validada en hardware (DevKit) |
-| Migración a la LilyGo T-SIM7000G (sin transmisión) | Pendiente (siguiente) |
-| 5. Transmisión remota (SIM7000G por LTE-M; después SIM7600G) | Pendiente |
+| Migración a la LilyGo T-SIM7000G (sin transmisión) | Cerrada (30/09/2026). Sensores comprobados (RS-485 en TX=GPIO19, RX=GPIO18). Pendiente de comprobar: funcionamiento solo con batería |
+| 5. Transmisión remota (SIM7000G por LTE-M; después SIM7600G) | Pendiente (siguiente) |
 | 6. Almacenamiento en microSD | Validada en hardware (DevKit) |
 | 7. Gestión de energía (deep sleep, solar) | Pendiente |
 | 8. Sincronización temporal (GNSS/NTP) | Pendiente |
@@ -33,6 +33,12 @@ cambian los sensores, las medidas sin hora van a un archivo aparte, y al
 sacar y volver a meter la tarjeta el nodo sigue escribiendo solo. La
 pantalla muestra el ID del nodo junto al reloj y el estado de la tarjeta
 con la hora del último guardado.
+
+Migración (30/09/2026): el firmware arranca en la T-SIM7000G (chip
+revisión v1.0, flash de 4 MB, ID `F8C7F0`) con RTC, pantalla y microSD
+funcionando en el slot de la placa, y los sensores respondiendo con el
+RS-485 en TX=GPIO19, RX=GPIO18. Queda por comprobar que el nodo funcione
+solo con la batería.
 
 ## Hardware
 
@@ -55,7 +61,7 @@ de `main.c` y `tarjeta_sd.c` y reescribir la parte del módem.
 
 | Elemento | Detalle |
 |---|---|
-| RS-485 | Módulo RS485-TTL con auto-dirección, alimentado a 3,3 V. UART2 a 9600 8N1. DevKit: TX=GPIO17, RX=GPIO16. **T-SIM7000G: TX=GPIO18, RX=GPIO19** (16 y 17 están ocupados por la PSRAM del WROVER). Los pines `TX`/`RX` del header son la consola (UART0): no conectar ahí el RS-485 |
+| RS-485 | Módulo RS485-TTL con auto-dirección, alimentado a 3,3 V. UART2 a 9600 8N1. DevKit: TX=GPIO17, RX=GPIO16. **T-SIM7000G: TX=GPIO19, RX=GPIO18** (16 y 17 están ocupados por la PSRAM del WROVER). Los pines `TX`/`RX` del header son la consola (UART0): no conectar ahí el RS-485 |
 | Módem (T-SIM7000G, fase 5) | SIM7000G por UART1: TX del ESP32=GPIO27, RX=GPIO26; encendido (PWRKEY) por GPIO4. No conectar nada a los pines 4 y 25 del header |
 | Bus I2C | I2C_NUM_0, SDA=GPIO21, SCL=GPIO22 (igual en las dos placas) |
 | RTC | DS3231 (0x68) con pila CR2032, 3,3 V. EEPROM 24C32 del módulo en 0x57 |
@@ -359,7 +365,7 @@ Configuration Editor" de la extensión ESP-IDF). Se navega con las flechas,
 |---|---|---|
 | Serial flasher config → Flash size | **4 MB** | Es la flash real del ESP32-WROVER-B (y del DevKit). Con 2 MB el firmware funciona, pero ESP-IDF avisa al arrancar y solo usa la mitad |
 | Partition Table | **No cambiar** | Si se mueve la partición `nvs`, el nodo pierde el contador `seq` |
-| Component config → Hardware Settings → Chip revision → Minimum Supported ESP32 Revision | **Rev v0.0** (por defecto) | El WROVER-B lleva un chip de revisión antigua. Con un mínimo mayor (p. ej. v3.0), el bootloader se niega a arrancar (`Image requires chip rev >= v3.0`) |
+| Component config → Hardware Settings → Chip revision → Minimum Supported ESP32 Revision | **Rev v0.0** (por defecto) | Hay T-SIM7000G con chips de revisión antigua (v1.0) y moderna (v3.1). Con el mínimo en v0.0 el firmware arranca en todas; con un mínimo mayor que el del chip (p. ej. v3.0 en una placa v1.0), el bootloader se niega a arrancar (`Image requires chip rev >= v3.0`) |
 | Component config → ESP PSRAM → Support for external, SPI-connected RAM | **Desactivada** (por defecto) | El firmware no necesita la RAM externa. Pendiente de decisión definitiva |
 | Component config → FAT Filesystem support → Long filename support | **Activada** (cualquier modo salvo "No long filenames") | Los archivos de la SD tienen nombres largos (`125010_2026-09-29.csv`). Sin esto no se pueden crear |
 
@@ -387,6 +393,6 @@ cable y grabar.
   lectura después de conectarlo no es fiable.
 - GPIO16/17 están conectados a la PSRAM en el ESP32-WROVER-B (T-SIM7000G)
   y en el WROVER-E (T-SIM7600G): en las LilyGo el UART2 del RS-485 va por
-  los GPIO18 (TX) y 19 (RX).
+  los GPIO19 (TX) y 18 (RX).
 - El desfase horario es fijo: el nodo no sirve tal cual en países con
   horario de verano (ver "Desplegar en otro país").

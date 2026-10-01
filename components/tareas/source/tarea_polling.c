@@ -66,12 +66,12 @@ void tarea_polling(void *parametros)
             xQueueReset(uart_queue);
 
             // Para ver por pantalla la trama que estás enviando
-            /* for (int j = 0; j < MODBUS_TAM_PETICION; j++)
+            /*for (int j = 0; j < MODBUS_TAM_PETICION; j++)
              {
                  printf("%02X ", peticion[j]);
              }
-             printf("\n");
-             */
+             printf("\n");*/
+             
 
             uart_write_bytes(RS485_UART, peticion, MODBUS_TAM_PETICION);
 
@@ -100,10 +100,10 @@ void tarea_polling(void *parametros)
                             {
                                 trama_ok = true;
 
-                                /*Para ver por pantalla la trama que recibes
-                                for (int k = 0; k < longitud; k++)
+                               // Para ver por pantalla la trama que recibes
+                               /* for (int k = 0; k < longitud; k++)
                                     printf("%02X ", datos_rx[k]);
-                                    */
+                                 */   
                             }
                         }
                     }

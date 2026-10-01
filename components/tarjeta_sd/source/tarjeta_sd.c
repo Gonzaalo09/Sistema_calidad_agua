@@ -27,10 +27,10 @@
 
 // Unico sitio con el hardware de la SD: al migrar al LilyGo se cambia aqui
 #define SD_SPI_HOST SPI3_HOST // VSPI
-#define SD_PIN_MOSI 23
-#define SD_PIN_MISO 19
-#define SD_PIN_SCK 18
-#define SD_PIN_CS 5
+#define SD_PIN_MOSI 15        // 23 esp de ejemplo, 15 en 7000G
+#define SD_PIN_MISO 2         // 19 esp de ejemplo, 2 en 7000G
+#define SD_PIN_SCK 14         // 18 esp de ejemplo, 14 en 7000G
+#define SD_PIN_CS 13          // 5 esp ejemplo, 13 en 7000G 
 #define SD_FREQ_KHZ 5000 // 40 MHz / 8: de sobra para una linea por ciclo
 
 #define PUNTO_MONTAJE "/sdcard"
