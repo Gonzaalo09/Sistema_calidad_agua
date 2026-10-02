@@ -106,6 +106,67 @@ static modem_estado_t ejecutar(const char *cmd, char *resp_out, size_t tam_resp,
     return MODEM_TIMEOUT;
 }
 
+static modem_estado_t enviar_linea(const char *cmd)
+{
+    uart_flush_input(UART_NUM_1);      // se vacía ANTES de enviar; después ya no
+    if ( uart_write_bytes(UART_NUM_1, cmd, strlen(cmd)) < 0)
+    {
+        return MODEM_ERROR; 
+    }
+    if (uart_write_bytes(UART_NUM_1, "\r", 1) < 0)
+    {
+        return MODEM_ERROR; 
+    }
+    return MODEM_OK;
+}
+
+static modem_estado_t esperar_linea(const char *texto, char *resp, size_t tam, uint32_t timeout_ms)
+{
+    size_t n = 0;
+    size_t hueco;
+    int leidos;
+    const char *p;
+    uint32_t t0 = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
+
+    resp[0] = '\0';
+
+    while (((uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS) - t0) < timeout_ms)
+    {
+        hueco = tam - 1 - n; 
+        if (hueco == 0)
+        {
+            ESP_LOGE(TAG, "respuesta mas larga que el buffer"); 
+            return MODEM_ERROR; 
+        }
+
+        leidos = uart_read_bytes(UART_NUM_1, resp + n, hueco, pdMS_TO_TICKS(MODEM_TROZO_LECTURA_MS));
+        if (leidos < 0)
+        {
+            return MODEM_ERROR; 
+        }else 
+        {
+            n += leidos; 
+            resp[n] = '\0';
+
+            p = strstr(resp, texto); 
+            if (p != NULL && strstr(p + strlen(texto), "\r\n") != NULL)
+            {
+                ESP_LOGI(TAG, "-> %s", p); 
+                return MODEM_OK;
+            }
+
+            if ((strstr(resp, "\r\nERROR\r\n") || strstr(resp, "\r\n+CME ERROR:")))
+            {
+                ESP_LOGW(TAG, "-> %s", resp);
+                return MODEM_ERROR; 
+            }
+        }
+    }
+    ESP_LOGW(TAG, "timeout esperando %s, recibido: %s", texto, resp);
+    return MODEM_TIMEOUT;
+}
+// ----------------------------------------------------API_PUBLICA---------------------------------------------------------
+
 
 modem_estado_t modem_sondear_at(int intentos)
 {
@@ -211,6 +272,194 @@ modem_estado_t modem_comando(const char *cmd, char *resp_out, size_t tam_resp, u
         return MODEM_ERROR; 
     }
     return ejecutar(cmd, resp_out, tam_resp, timeout_ms, true);
+}
+
+// true si AT+CNACT? devuelve +CNACT: <status> con status = CNACT_ACTIVA (manual V1.06, 5.2.30)
+static bool app_network_activa(char *resp, size_t tam_resp)
+{
+    const char *p;
+    int estado;
+
+    if (ejecutar("AT+CNACT?", resp, tam_resp, MODEM_TIMEOUT_COMANDO_MS, true) != MODEM_OK)
+    {
+        return false;
+    }
+    // Localiza el inicio de la línea de interes
+    p = strstr(resp, "+CNACT:");
+    // la suma p + ... slata ese texto y apunta justo detrás, respuesta supuesta: CNACT: 1,"10.20.30.40"
+    if (p == NULL || sscanf(p + strlen("+CNACT:"), "%d", &estado) != 1)
+    {
+        return false;
+    }
+    return estado == CNACT_ACTIVA;
+}
+
+/**
+ * Miras si la red está lista para recibir datos 
+ */
+modem_estado_t modem_abrir_datos(const char *apn, const char *usuario, const char *clave)
+{
+    static char resp[MODEM_TAM_RESPUESTA];
+    static char cmd[MODEM_TAM_COMANDO];
+    modem_estado_t est;
+    uint32_t t0;
+
+    if (apn == NULL || usuario == NULL || clave == NULL)
+    {
+        return MODEM_ERROR;
+    }
+
+    // ¿ya está activa? (el módem sigue encendido entre ciclos)
+    if (app_network_activa(resp, sizeof(resp)))
+    {
+        return MODEM_OK;
+    }
+
+    // APN, usuario, clave y PAP en un solo comando (manual V1.06, 5.2.31)
+    // Miras si el buffer se pasa de tamaño
+    if (snprintf(cmd, sizeof(cmd), "AT+CNCFG=1,\"%s\",\"%s\",\"%s\",1", apn, usuario, clave) >= (int)sizeof(cmd))
+    {
+        return MODEM_ERROR;
+    }
+    est = ejecutar(cmd, resp, sizeof(resp), MODEM_TIMEOUT_COMANDO_MS, true);
+    if (est != MODEM_OK)
+    {
+        return est;
+    }
+
+    // Activar (5.2.30): contesta OK al momento; la IP llega después
+    est = ejecutar("AT+CNACT=1", resp, sizeof(resp), MODEM_TIMEOUT_COMANDO_MS, true);
+    if (est != MODEM_OK)
+    {
+        return est;
+    }
+
+    // Esperar a que esté activa, preguntando cada segundo
+    t0 = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
+    while (((uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS) - t0) < MODEM_TIMEOUT_CNACT_MS)
+    {
+        if (app_network_activa(resp, sizeof(resp)))
+        {
+            // La IP ya sale en el log de ejecutar
+            ESP_LOGI(TAG, "datos activos en %lu ms",
+                     (unsigned long)((uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS) - t0));
+            return MODEM_OK;
+        }
+        vTaskDelay(pdMS_TO_TICKS(MODEM_SONDEO_CNACT_MS));
+    }
+
+    ESP_LOGW(TAG, "la conexion de datos no se activo");
+    return MODEM_TIMEOUT;
+}
+
+modem_estado_t modem_http_post(const char *dominio, const char *ruta, const char *cuerpo, size_t len, int *codigo_out)
+{
+    static char resp[MODEM_TAM_RESPUESTA];
+    static char cmd[MODEM_TAM_COMANDO];
+    const char *p;
+    modem_estado_t est;
+
+    if (codigo_out == NULL)
+    {
+        return MODEM_ERROR;
+    }
+    *codigo_out = 0;
+
+    if (dominio == NULL || ruta == NULL || cuerpo == NULL)
+    {
+        return MODEM_ERROR;
+    }
+
+    // Por si quedó una conexión abierta (reset del ESP32 a mitad de envío con el
+    // módem encendido). Silencioso: lo normal es que devuelva ERROR
+    ejecutar("AT+SHDISC", resp, sizeof(resp), MODEM_TIMEOUT_COMANDO_MS, false);
+
+    // Configurar (9.2.2): antes de conectar. Solo guarda ajustes en el módem
+    // Guarda la URL del servidor. Aún no conecta
+    if (snprintf(cmd, sizeof(cmd), "AT+SHCONF=\"URL\",\"%s\"", dominio) >= (int)sizeof(cmd))
+    {
+        return MODEM_ERROR;
+    }
+
+    est = ejecutar(cmd, resp, sizeof(resp), MODEM_TIMEOUT_COMANDO_MS, true);
+    if (est == MODEM_OK)
+    {
+        // Fija el tamaño máximo del cuerpo (1024 B). Solo configura
+        est = ejecutar("AT+SHCONF=\"BODYLEN\",1024", resp, sizeof(resp), MODEM_TIMEOUT_COMANDO_MS, true);
+    }
+
+    if (est == MODEM_OK)
+    {
+        // Fija el tamaño máximo de las cabeceras (350 B). Solo configura
+        est = ejecutar("AT+SHCONF=\"HEADERLEN\",350", resp, sizeof(resp), MODEM_TIMEOUT_COMANDO_MS, true);
+    }
+
+    // Abre la conexión con el servidor (9.2.3)
+    if (est == MODEM_OK)
+    {
+        est = ejecutar("AT+SHCONN", resp, sizeof(resp), MODEM_TIMEOUT_SHCONN_MS, true);
+    }
+
+    // Cabecera y cuerpo (9.2.6 y 9.2.5): después de conectar
+    if (est == MODEM_OK)
+    {
+        // Guarda la cabecera Content-Type en el módem. Aún no se envía
+        est = ejecutar("AT+SHAHEAD=\"Content-Type\",\"application/json\"", resp, sizeof(resp),
+                       MODEM_TIMEOUT_COMANDO_MS, true);
+    }
+    if (est == MODEM_OK)
+    {
+        // Avisa al módem: "te mando <len> bytes de cuerpo". Aún no es el cuerpo
+        snprintf(cmd, sizeof(cmd), "AT+SHBODEXT=%u,%u", (unsigned)len, (unsigned)MODEM_SHBODEXT_MS);
+        est = enviar_linea(cmd);
+    }
+    if (est == MODEM_OK)
+    {
+        // El manual no dice si sale un aviso (">") antes del texto. Con la pausa
+        // da igual: si sale, queda en resp y no estorba
+        vTaskDelay(pdMS_TO_TICKS(MODEM_PAUSA_CUERPO_MS));
+        // Manda el JSON por la UART. El módem lo guarda, aún no se envía
+        if (uart_write_bytes(UART_NUM_1, cuerpo, len) < 0)
+        {
+            est = MODEM_ERROR;
+        }
+    }
+    if (est == MODEM_OK)
+    {
+        // Espera a que el módem confirme que ha recibido el cuerpo completo
+        // Sin Ctrl-Z: el módem cierra el cuerpo solo, por longitud o al pasar
+        // MODEM_SHBODEXT_MS (9.2.5)
+        est = esperar_linea("\r\nOK", resp, sizeof(resp), MODEM_SHBODEXT_MS + MODEM_TIMEOUT_COMANDO_MS);
+    }
+
+    // POST (9.2.11): OK al momento y, más tarde, +SHREQ: "POST",<codigo>,<len>
+    if (est == MODEM_OK)
+    {
+        // Lanza el POST: ahora el módem envía cabecera y cuerpo al servidor
+        snprintf(cmd, sizeof(cmd), "AT+SHREQ=\"%s\",3", ruta); // 3 = POST
+        est = enviar_linea(cmd);
+    }
+    if (est == MODEM_OK)
+    {
+        // Espera la respuesta del servidor: +SHREQ: "POST",<codigo>,<len>
+        // El OK de antes queda en resp y no estorba
+        est = esperar_linea("+SHREQ:", resp, sizeof(resp), MODEM_TIMEOUT_SHREQ_MS);
+    }
+    if (est == MODEM_OK)
+    {
+        // Extrae el código HTTP (200, 4xx...) de la línea +SHREQ
+        p = strstr(resp, "+SHREQ:");
+        p = (p != NULL) ? strchr(p, ',') : NULL; // primera coma, después de "POST"
+        if (p == NULL || sscanf(p + 1, "%d", codigo_out) != 1)
+        {
+            est = MODEM_ERROR;
+        }
+    }
+
+    // Desconectar siempre (9.2.13), haya ido bien o mal
+    ejecutar("AT+SHDISC", resp, sizeof(resp), MODEM_TIMEOUT_COMANDO_MS, true);
+
+    return est;
 }
 
 modem_estado_t modem_apagar(void)

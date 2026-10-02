@@ -21,7 +21,7 @@ un ordenador**, mirando la pantalla del nodo o los datos transmitidos.
 | 4a. Bring-up de la pantalla OLED | Validada en hardware (DevKit) |
 | 4b. Tabla de estado y pantallas de diagnóstico | Validada en hardware (DevKit) |
 | Migración a la LilyGo T-SIM7000G (sin transmisión) | Cerrada (30/09/2026). Sensores comprobados (RS-485 en TX=GPIO19, RX=GPIO18). Pendiente de comprobar: funcionamiento solo con batería |
-| 5. Transmisión remota (SIM7000G por LTE-M; después SIM7600G) | Pendiente (siguiente) |
+| 5. Transmisión remota (SIM7000G por LTE-M; después SIM7600G) | En curso (02/10/2026). Validados en la T-SIM7000G: bring-up del módem, registro en la red y envío de cada ciclo por HTTP (5.1, 5.2 y 5.3+5.4). Pendiente: prueba sin antena y pantalla de red (5.5) |
 | 6. Almacenamiento en microSD | Validada en hardware (DevKit) |
 | 7. Gestión de energía (deep sleep, solar) | Pendiente |
 | 8. Sincronización temporal (GNSS/NTP) | Pendiente |
@@ -39,6 +39,13 @@ revisión v1.0, flash de 4 MB, ID `F8C7F0`) con RTC, pantalla y microSD
 funcionando en el slot de la placa, y los sensores respondiendo con el
 RS-485 en TX=GPIO19, RX=GPIO18. Queda por comprobar que el nodo funcione
 solo con la batería.
+
+Transmisión (02/10/2026, placa `AC3D04`, SIM de Claro Perú): el nodo
+enciende el módem, se registra en la red y envía cada ciclo como JSON por
+HTTP al servidor; el servidor responde 200 y la medida aparece en la base
+de datos. En la prueba, el módem no encontró LTE-M ni NB-IoT y se registró
+en **GSM** (GPRS): un envío completo tarda 2–3 s. Ver "Transmisión de
+datos".
 
 ## Hardware
 
@@ -62,7 +69,7 @@ de `main.c` y `tarjeta_sd.c` y reescribir la parte del módem.
 | Elemento | Detalle |
 |---|---|
 | RS-485 | Módulo RS485-TTL con auto-dirección, alimentado a 3,3 V. UART2 a 9600 8N1. DevKit: TX=GPIO17, RX=GPIO16. **T-SIM7000G: TX=GPIO19, RX=GPIO18** (16 y 17 están ocupados por la PSRAM del WROVER). Los pines `TX`/`RX` del header son la consola (UART0): no conectar ahí el RS-485 |
-| Módem (T-SIM7000G, fase 5) | SIM7000G por UART1: TX del ESP32=GPIO27, RX=GPIO26; encendido (PWRKEY) por GPIO4. No conectar nada a los pines 4 y 25 del header |
+| Módem (T-SIM7000G, fase 5) | SIM7000G por UART1 a 115200: TX del ESP32=GPIO27, RX=GPIO26; encendido (PWRKEY) por GPIO4. No conectar nada a los pines 4 y 25 del header. Hace falta SIM con datos y antena conectada |
 | Bus I2C | I2C_NUM_0, SDA=GPIO21, SCL=GPIO22 (igual en las dos placas) |
 | RTC | DS3231 (0x68) con pila CR2032, 3,3 V. EEPROM 24C32 del módulo en 0x57 |
 | OLED | SSD1306 128×64 de 0,96" (0x3C), 3,3 V |
@@ -90,8 +97,8 @@ de `main.c` y `tarjeta_sd.c` y reescribir la parte del módem.
 ```
 app_main ── UART2, estado_sistema, config_nodo (NVS), bus I2C, RTC, OLED, SD ── crea las tareas
 
-tarea_polling (5) ──cola_lecturas (1 elemento por ciclo)──> tarea_transmision (3) ── tarjeta_sd
-      │
+tarea_polling (5) ──cola_lecturas (1 elemento por ciclo)──> tarea_transmision (3) ──┬── modem ── servidor (HTTP)
+      │                                                                             └── tarjeta_sd
       ├── RTC (DS3231) ──────┐
       ▼                      ├── I2C_bus
    estado_sistema            │
@@ -115,12 +122,13 @@ fuente publica su último valor, su estado y cuándo funcionó por última vez.
 | `sensores` | `TABLA_SENSORES` y el descriptor de cada sensor |
 | `config_nodo` | ID del nodo (sacado de la MAC del chip) y número de ciclo `seq`, guardado en la memoria interna (NVS) |
 | `tarjeta_sd` | Tarjeta microSD por SPI con sistema de archivos FAT: montar, desmontar, escribir. Nunca formatea |
+| `modem` | SIM7000G por comandos AT sobre UART1: encender, apagar, enviar un comando, abrir la conexión de datos y hacer un POST HTTP (devuelve el código del servidor) |
 | `I2C_bus` | Dueño único del bus I2C; cada chip registra su propio dispositivo |
 | `RTC` | Driver propio del DS3231 en tres capas, siempre en UTC |
 | `pantalla_oled` | Driver del SSD1306 sobre U8g2: callbacks de I2C y esperas, y primitivas de dibujo por líneas |
 | `u8g2` | Librería de terceros (olikraus, BSD), copiada al repo para poder compilar sin internet |
 | `estado_sistema` | Tabla de estado por fuente, con mutex |
-| `tareas` | `tarea_polling`, `tarea_transmision`, `tarea_rtc` y `tarea_pantalla`, y el tipo `ciclo` de la cola |
+| `tareas` | `tarea_polling`, `tarea_transmision`, `tarea_rtc` y `tarea_pantalla`, el tipo `ciclo` de la cola, y `registro_csv` (formato de la línea CSV y de la trama JSON) |
 
 ### Añadir o modificar un sensor
 
@@ -175,7 +183,7 @@ Cada línea es un ciclo de medida. Columnas, en orden:
 | `seq` | Número de ciclo: nunca se repite en un nodo. Un hueco es un ciclo que no llegó a la tarjeta |
 | `rtc` | Código de estado del RTC |
 | `<sensor>_est` | Código de estado del sensor, y a continuación una columna por magnitud (`NPK_Nitrogeno`…). Si el sensor falló, sus valores quedan vacíos |
-| `tx` | Resultado del envío (hoy `0`: la transmisión aún no existe) |
+| `tx` | Resultado del envío de ese ciclo: código HTTP del servidor (`200` = guardado) o un código propio del nodo menor que 100. Ver "Transmisión de datos" |
 
 Abrir en Excel: **Datos → Desde texto/CSV**, delimitador **punto y coma**.
 Los decimales van con **punto**: si Excel está en español y convierte
@@ -204,6 +212,56 @@ usando la configuración regional Inglés (Estados Unidos)).
   tarjeta puesta, el ordenador puede no conseguir grabar la placa.
 - DevKit: el módulo lector se alimenta del pin **VIN** (5 V). Con 3,3 V su
   regulador no da suficiente tensión a la tarjeta.
+
+## Transmisión de datos
+
+En cada ciclo, `tarea_transmision` construye la trama, la envía y después
+guarda la línea en la microSD con el resultado en la columna `tx`. Un solo
+intento por ciclo: lo que falle queda en la tarjeta con su `tx`.
+
+1. Trama: un objeto JSON plano con las mismas claves que las columnas del
+   CSV, salvo `fecha` y `tx`. Un sensor que falla, o un valor que no es un
+   número, va como `null`.
+2. Se comprueba el registro en la red (`AT+CEREG?` para LTE y `AT+CGREG?`
+   para GSM). Sin red no se intenta la conexión de datos.
+3. Se activa la conexión de datos (APN de la SIM) si no lo estaba.
+4. POST HTTP al servidor (`DOMINIO_SERVIDOR` y `RUTA_MEDIDAS` en
+   `tarea_transmision.c`). Sin seguridad por ahora: HTTP sin `s` y sin clave.
+
+El módem se enciende al arrancar y **se queda encendido y registrado entre
+ciclos** (decisión para las pruebas; el comportamiento definitivo, con deep
+sleep, es de la fase 7).
+
+### Valor de `tx`
+
+| `tx` | Significado | ¿Se reenviará más adelante? |
+|---|---|---|
+| 0 | No intentado | — |
+| 200 | Guardado en el servidor (o ya estaba) | No |
+| 400 | El servidor rechaza la trama: falta `nodo`, `seq`, `ts` o `rtc` | No |
+| 403 | Dispositivo desactivado en la plataforma | No |
+| 409 | Mismo `(nodo, seq)` con otro contenido: va a incidencias | No |
+| 500 | Error del servidor o de su base de datos | Sí |
+| 1 | Sin red (ni LTE ni GSM registrados) | Sí |
+| 2 | No se pudo activar la conexión de datos | Sí |
+| 3 | El módem no contesta | Sí |
+| 4 | El módem devolvió error durante el envío | Sí |
+| 5 | No llegó la respuesta del servidor a tiempo | Sí |
+| 6 | La trama no cabe en el buffer | Sí |
+
+Los códigos 1 a 6 son **provisionales**: están en `registro_csv.h` pero
+sus valores definitivos no están confirmados. El reenvío desde la tarjeta
+todavía no existe.
+
+### Datos medidos en la prueba (T-SIM7000G `AC3D04`, SIM Claro Perú)
+
+- Sin LTE-M ni NB-IoT en el sitio de prueba: registro en GSM a los 69 s del
+  arranque del módem. Cobertura LTE-M de Claro Perú: sin verificar.
+- Envío completo por GPRS: 2–3 s. Con GPRS el módem puede pedir picos de
+  2 A (0,6 A en LTE-M): con batería baja puede reiniciar la placa.
+- Sin antena, el registro se da por perdido a los 120 s y los ciclos
+  siguen guardándose en la tarjeta. Falta la prueba sin antena con el nodo
+  en marcha.
 
 ## Conectar la placa al ordenador (una vez por PC)
 
@@ -282,7 +340,8 @@ proyecto algo más que dependa del país, se apunta aquí.
 | Desfase horario del país | Firmware: `OFFSET_PAIS_S` en `tarea_rtc.h` (componente `tareas`) | Horas respecto a UTC × 3600, con signo. Perú (UTC−5): `(-5 * 3600)`. Ejemplo, Bolivia (UTC−4): `(-4 * 3600)` |
 | El mismo desfase en el servidor | Servidor: campo `desfase_s` del nodo en la tabla de nodos | El mismo valor en segundos (Perú: `-18000`). Si no coincide con el del firmware, el servidor calculará mal la hora de todas las medidas de ese nodo |
 | Puesta en hora del RTC | PC con el que se compila con `FORZAR_HORA 1` | Toma la hora del PC y le resta `OFFSET_PAIS_S`: el reloj del PC tiene que estar en la hora del país de destino al compilar |
-| Red móvil | Tarjeta SIM y firmware (fase 5, aún sin implementar) | SIM de un operador local, con su APN, usuario y contraseña. Comprobar que el operador ofrece LTE-M en la zona y que el módem de la placa admite sus bandas: SIM7000G Cat-M1 en B1/B2/B3/B4/B5/B8/B12/B13/B18/B19/B20/B26/B28/B39 (SIMCom, Hardware Design V1.07); SIM7600G, sin verificar. Cobertura LTE-M en Perú: sin verificar |
+| Red móvil | Tarjeta SIM y firmware: `APN_RED`, `USUARIO_APN` y `CLAVE_APN` en `tarea_transmision.c` (hoy Claro Perú: `claro.pe`, `claro`, `claro`) | SIM de un operador local, con su APN, usuario y contraseña. Comprobar que el operador ofrece LTE-M en la zona y que el módem de la placa admite sus bandas: SIM7000G Cat-M1 en B1/B2/B3/B4/B5/B8/B12/B13/B18/B19/B20/B26/B28/B39 (SIMCom, Hardware Design V1.07); SIM7600G, sin verificar. Cobertura LTE-M en Perú: sin verificar |
+| Servidor de datos | Firmware: `DOMINIO_SERVIDOR` y `RUTA_MEDIDAS` en `tarea_transmision.c` | Dominio (`http://dominio`, máx. 64 caracteres) y ruta de la API que recibe las medidas. El nodo debe estar dado de alta y activo en esa plataforma, o el servidor responde 403 |
 | Idioma de la pantalla | Firmware: `estado_sistema.c` (`estado_sistema_texto`, `estado_sistema_accion`) y `tarea_pantalla.c` | Los mensajes están en español. Cada acción cabe en 23 caracteres. La fuente admite acentos y ñ (Latin-1), no otros alfabetos |
 
 **Limitación: solo países sin horario de verano.** El desfase es fijo. En
@@ -394,5 +453,10 @@ cable y grabar.
 - GPIO16/17 están conectados a la PSRAM en el ESP32-WROVER-B (T-SIM7000G)
   y en el WROVER-E (T-SIM7600G): en las LilyGo el UART2 del RS-485 va por
   los GPIO19 (TX) y 18 (RX).
+- Transmisión: sin seguridad (HTTP sin clave ni cifrado), el módem se
+  queda encendido entre ciclos, y la página de red de la pantalla aún no
+  muestra operador, señal ni resultado del envío (5.5). El reenvío de lo
+  que falle no está hecho.
+- El módem puede registrarse en GSM en vez de LTE-M, con picos de 2 A.
 - El desfase horario es fijo: el nodo no sirve tal cual en países con
   horario de verano (ver "Desplegar en otro país").

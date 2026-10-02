@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <time.h>
+#include <math.h>
 
 #include "sensores.h"
 #include "config_nodo.h"
@@ -43,8 +44,7 @@
  *       comprobar empiezan en el 5 (...). Asi el compilador avisa, igual
  *       que con printf, si un tipo no cuadra (p. ej. %s con un float).
  */
-__attribute__((format(printf, 4, 5)))
-static void anadir(char *buf, size_t tam, size_t *usado, const char *formato, ...)
+__attribute__((format(printf, 4, 5))) static void anadir(char *buf, size_t tam, size_t *usado, const char *formato, ...)
 {
     if (*usado >= tam)
     {
@@ -65,7 +65,7 @@ static void anadir(char *buf, size_t tam, size_t *usado, const char *formato, ..
     *usado += (size_t)n;
 }
 
-// Se crea la cabecera a traves de la tabla sensores por lo tanto no hay posibilidad de error al meter nuevos sensores 
+// Se crea la cabecera a traves de la tabla sensores por lo tanto no hay posibilidad de error al meter nuevos sensores
 size_t registro_csv_cabecera(char *buf, size_t tam)
 {
     size_t usado = 0;
@@ -145,10 +145,10 @@ size_t registro_csv_linea(const ciclo *c, int tx, char *buf, size_t tam)
 
         anadir(buf, tam, &usado, ";%d", (int)s->codigo);
 
-        // Columnas: las de la tabla (d). Valores rellenos: los del ciclo (s). 
+        // Columnas: las de la tabla (d). Valores rellenos: los del ciclo (s).
         for (uint8_t j = 0; j < d->num_valores; j++)
         {
-            // Se chequea prque s tiene el num_valores de los que se ha leido correctamente, y si no 
+            // Se chequea prque s tiene el num_valores de los que se ha leido correctamente, y si no
             // se han podidio leer bien tienes que poner huecos para que tenga la misma longitud que la trama
             if (j < s->num_valores)
             {
@@ -203,11 +203,48 @@ void registro_csv_ruta(uint32_t ts, char *buf, size_t tam)
     struct tm local;
     gmtime_r(&t, &local);
 
-    char anio[5];  // "2026"
-    char dia[11];  // "2026-09-29"
+    char anio[5]; // "2026"
+    char dia[11]; // "2026-09-29"
     strftime(anio, sizeof(anio), "%Y", &local);
     strftime(dia, sizeof(dia), "%Y-%m-%d", &local);
 
-
     snprintf(buf, tam, "%s/%s_%s", anio, config_nodo_id(), dia);
+}
+
+size_t registro_csv_json(const ciclo *c, char *buf, size_t tam)
+{
+    size_t usado = 0;
+
+    anadir(buf, tam, &usado, "{\"formato\":%d,\"nodo\":\"%s\",\"seq\":%lu,\"ts\":%lu,\"rtc\":%d",
+           FORMATO_CSV, config_nodo_id(), (unsigned long)c->seq,
+           (unsigned long)c->ts, (int)c->estado_rtc);
+
+    for (int i = 0; i < NUM_SENSORES; i++)
+    {
+        // TABLA_SENSORES[i] describe el sensor, c->sensor[i] trae sus valores en este ciclo
+        const sensor_descrip *d = &TABLA_SENSORES[i];
+        const ciclo_sensor *s = &c->sensor[i];
+        anadir(buf, tam, &usado, ",\"%s_est\":%d", d->nombre_fuente, (int)s->codigo);
+
+        for (int j = 0; j < d->num_valores; j++)
+        {
+            anadir(buf, tam, &usado, ",\"%s_%s\":", d->nombre_fuente, d->nombres_datos[j]);
+            if ((j < s->num_valores) && (isfinite(s->valores[j])))
+            {
+                anadir(buf, tam, &usado, "%.3f", s->valores[j]);
+            }
+            else
+            {
+                anadir(buf, tam, &usado, "null"); // Sensor que falla o valor no finito
+            }
+        }
+    }
+    anadir(buf, tam, &usado, "}");
+
+    if (usado >= tam)
+    {
+        buf[0] = '\0';
+        return 0;
+    }
+    return usado;
 }

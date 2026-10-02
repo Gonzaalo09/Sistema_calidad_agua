@@ -18,6 +18,12 @@
 #define MAX_ARCHIVOS_DIA 9 // _2 .. _9 si cambian los sensores el mismo dia
 #define TAM_RESP_MODEM 256 // criterio: la respuesta mas larga de 5.1 (AT+CGMR) son decenas de bytes
 
+#define APN_RED "claro.pe"
+#define USUARIO_APN "claro"
+#define CLAVE_APN "claro"
+#define DOMINIO_SERVIDOR "http://yago.alwaysdata.net"
+#define RUTA_MEDIDAS "/servidor_3/api/v1/medidas"
+
 static const char *TAG = "transmision";
 
 /**
@@ -297,6 +303,59 @@ static bool esperar_registro(char *resp, size_t tam)
 }
 
 /**
+ * @brief Envia el ciclo al servidor por HTTP (un solo intento).
+ *
+ * @return Codigo HTTP del servidor (200, 400, 403, 409, 500...) o un TX_* (< 100).
+ */
+static int enviar_ciclo(const ciclo *lectura)
+{
+    static char json[TAM_TRAMA_JSON]; // static: fuera de la pila de la tarea
+    static char resp[TAM_RESP_MODEM];
+    size_t len;
+    int lte;
+    int gsm;
+    int codigo;
+    modem_estado_t est;
+
+    len = registro_csv_json(lectura, json, sizeof(json));
+    if (len == 0)
+    {
+        ESP_LOGE(TAG, "trama JSON no cabe: ciclo %lu", (unsigned long)lectura->seq);
+        return TX_TRAMA_NO_CABE;
+    }
+
+    // ¿Hay red? Se comprueba antes de activar datos: sin red, CNACT tardaria 85 s
+    lte = leer_stat("AT+CEREG?", "+CEREG:", resp, sizeof(resp));
+    gsm = leer_stat("AT+CGREG?", "+CGREG:", resp, sizeof(resp));
+    if ((lte == STAT_SIN_LEER) && (gsm == STAT_SIN_LEER))
+    {
+        return TX_MODEM_NO_CONTESTA;
+    }
+    if ((lte != STAT_REG_CASA) && (lte != STAT_REG_ROAMING) &&
+        (gsm != STAT_REG_CASA) && (gsm != STAT_REG_ROAMING))
+    {
+        return TX_SIN_RED;
+    }
+
+    if (modem_abrir_datos(APN_RED, USUARIO_APN, CLAVE_APN) != MODEM_OK)
+    {
+        return TX_SIN_CONEXION;
+    }
+
+    est = modem_http_post(DOMINIO_SERVIDOR, RUTA_MEDIDAS, json, len, &codigo);
+    if (est == MODEM_OK)
+    {
+        ESP_LOGI(TAG, "seq %lu -> HTTP %d", (unsigned long)lectura->seq, codigo);
+        return codigo;
+    }
+    if (est == MODEM_TIMEOUT)
+    {
+        return TX_SIN_RESPUESTA;
+    }
+    return TX_ERROR_MODEM;
+}
+
+/**
  * @brief Andamiaje del paso 5.1: enciende el modem, recorre los comandos de
  *        lectura y lo apaga. El detalle de cada respuesta lo deja en el log el
  *        propio componente del modem; aqui solo queda el veredicto.
@@ -333,6 +392,7 @@ static void bringup_modem(void)
             {
                 modem_comando(RED[i].cmd, resp, sizeof(resp), RED[i].timeout_ms);
             }
+            modem_abrir_datos(APN_RED, USUARIO_APN, CLAVE_APN); // la IP queda en el log
         }
     }
     else
@@ -340,10 +400,7 @@ static void bringup_modem(void)
         ESP_LOGW(TAG, "SIM no lista: no se intenta el registro");
     }
 
-    if (modem_apagar() != MODEM_OK)
-    {
-        ESP_LOGW(TAG, "El modem no confirmo el apagado");
-    }
+    // El modem se queda encendido entre ciclos (decision del 01/10/2026, para las pruebas)
 }
 
 void tarea_transmision(void *parametros)
@@ -365,7 +422,7 @@ void tarea_transmision(void *parametros)
 
         imprimir_ciclo(&lectura);
 
-        int tx = TX_NO_INTENTADO; // fase 5: aqui se transmite y tx toma el resultado
+        int tx = enviar_ciclo(&lectura);
 
         if (cabecera[0] != '\0')
         {

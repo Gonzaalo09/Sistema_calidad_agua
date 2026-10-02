@@ -14,6 +14,19 @@ AT+CNMP?	+CNMP: 2	Modo automático: puede usar GSM (2G) y LTE
 
 AT+CMNB?	+CMNB: 3	Dentro de LTE, acepta Cat-M1 y NB-IoT
 
-AT+CBANDCFG?	Cat-M: 1,2,3,4,5,8,12,13,18,19,20,26,28,39. NB-IoT: 8 Bandas habilitadas en cada modo
+AT+CBANDCFG?	Cat-M: 1,2,3,4,5,8,CNACT,13,18,19,20,26,28,39. NB-IoT: 8 Bandas habilitadas en cada modo
 
 AT+CPIN?	+CPIN: READY Hay una SIM puesta, el módem la lee, y no pide PIN
+
+AT+CCID -> 8951101130110872909f	Número de serie de la SIM (ICCID). 89 = telecomunicaciones, 51 = prefijo de Perú. La f del final es relleno: el ICCID tiene 19 dígitos y se guarda en 20 posiciones (nibbles). No es un error
+
+AT+CEREG? 46840 ms: CEREG 0, CGREG 2	LTE pasa a 0: "no registrado y ya no busca" (6.2.7). El módem deja de buscar Cat-M/NB-IoT a los ~47 s; GSM sigue buscando
+AT+CGREG? 68680 ms: … CGREG 1	Registrado en GSM, red propia (6.2.5). Tiempo total: 68,7 s
+
+AT+CPSI: GSM,Online,716-10,0x04db,6789,249 CELL 850,-68,0,29-29	
+
+Formato GSM (5.2.21): sistema GSM, MCC-MNC 716-10 (Perú, Claro), LAC 0x04DB, celda 6789, canal (ARFCN) 249 en la banda GSM 850, nivel recibido −68 dBm. El resto es un ajuste del oscilador y los coeficientes de selección de celda
+
+AT+COPS: 0,0,"Claro",3	Selección automática, nombre en formato largo, <netact> 3 = GSM EGPRS (3.2.9)
+
+AT+CSQ: 22,0	Escala de 2 dB desde 2 = −110 dBm, así que 22 → −110 + 20·2 = −70 dBm, coherente con los −68 de CPSI. ber 0 es la mejor calidad. Buena señal
