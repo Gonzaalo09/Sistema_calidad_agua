@@ -14,6 +14,7 @@
 static const char *TAG = "estado_sistema";
 
 static estado_fuente_t tabla[NUM_FUENTES];
+static registro_red_t registro_red;
 static SemaphoreHandle_t mutex = NULL;
 static const uint32_t MUTEX_TIMEOUT_MS = 100;
 
@@ -33,6 +34,7 @@ esp_err_t estado_sistema_init(void)
     }
 
     memset(tabla, 0, sizeof(tabla));
+    memset(&registro_red, 0, sizeof(registro_red));
 
     tabla[FUENTE_RTC].nombre = "RTC";
     tabla[FUENTE_PANTALLA].nombre = "Pantalla";
@@ -120,6 +122,51 @@ bool estado_sistema_leer(size_t fuente, estado_fuente_t *destino)
     }
 
     *destino = tabla[fuente];
+
+    xSemaphoreGive(mutex);
+
+    return true;
+}
+
+void estado_sistema_publicar_red(const modem_red_t *red, int tx, bool envio_ok, uint32_t ts)
+{
+    if ((mutex == NULL) || (red == NULL))
+    {
+        ESP_LOGE(TAG, "publicar_red: llamada antes del init o con puntero nulo");
+        return;
+    }
+
+    if (xSemaphoreTake(mutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) != pdTRUE)
+    {
+        ESP_LOGW(TAG, "Mutex ocupado, no se publica la red");
+        return;
+    }
+
+    registro_red.red = *red;
+    registro_red.tx = tx;
+    registro_red.hay_datos = true;
+
+    if (envio_ok == true)
+    {
+        registro_red.ultimo_ts_200 = ts;
+    }
+
+    xSemaphoreGive(mutex);
+}
+
+bool estado_sistema_leer_red(registro_red_t *destino)
+{
+    if ((mutex == NULL) || (destino == NULL))
+    {
+        return false;
+    }
+
+    if (xSemaphoreTake(mutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) != pdTRUE)
+    {
+        return false;
+    }
+
+    *destino = registro_red;
 
     xSemaphoreGive(mutex);
 

@@ -303,6 +303,39 @@ static bool esperar_registro(char *resp, size_t tam)
 }
 
 /**
+ * @brief Traduce un fallo de modem_http_post (estado + paso en que fallo) al tx propio.
+ *
+ * Timeout: en CONEXION es que no llega al servidor (5); en RESPUESTA, que el servidor
+ * no contesta (7); en CONFIG y PETICION, que el modem no responde a un comando (4).
+ * ERROR: en CONEXION (5); en el resto, error del modem (6).
+ */
+static int tx_desde_http(modem_estado_t est, modem_paso_t paso)
+{
+    if (est == MODEM_TIMEOUT)
+    {
+        switch (paso)
+        {
+        case MODEM_PASO_CONEXION:
+            return TX_SIN_SERVIDOR;
+
+        case MODEM_PASO_RESPUESTA:
+            return TX_SIN_RESPUESTA;
+
+        case MODEM_PASO_CONFIG:
+        case MODEM_PASO_PETICION:
+        default:
+            return TX_MODEM_NO_CONTESTA;
+        }
+    }
+
+    if (paso == MODEM_PASO_CONEXION)
+    {
+        return TX_SIN_SERVIDOR;
+    }
+    return TX_ERROR_MODEM;
+}
+
+/**
  * @brief Envia el ciclo al servidor por HTTP (un solo intento).
  *
  * @return Codigo HTTP del servidor (200, 400, 403, 409, 500...) o un TX_* (< 100).
@@ -316,12 +349,24 @@ static int enviar_ciclo(const ciclo *lectura)
     int gsm;
     int codigo;
     modem_estado_t est;
+    modem_paso_t paso;
 
     len = registro_csv_json(lectura, json, sizeof(json));
     if (len == 0)
     {
         ESP_LOGE(TAG, "trama JSON no cabe: ciclo %lu", (unsigned long)lectura->seq);
         return TX_TRAMA_NO_CABE;
+    }
+
+    // Miras si la sim está lista
+    est = modem_sim_lista();
+    if (est == MODEM_TIMEOUT)
+    {
+        return TX_MODEM_NO_CONTESTA;
+    }
+    if (est == MODEM_ERROR)
+    {
+        return TX_SIN_SIM; 
     }
 
     // ¿Hay red? Se comprueba antes de activar datos: sin red, CNACT tardaria 85 s
@@ -342,17 +387,13 @@ static int enviar_ciclo(const ciclo *lectura)
         return TX_SIN_CONEXION;
     }
 
-    est = modem_http_post(DOMINIO_SERVIDOR, RUTA_MEDIDAS, json, len, &codigo);
+    est = modem_http_post(DOMINIO_SERVIDOR, RUTA_MEDIDAS, json, len, &codigo, &paso);
     if (est == MODEM_OK)
     {
         ESP_LOGI(TAG, "seq %lu -> HTTP %d", (unsigned long)lectura->seq, codigo);
         return codigo;
     }
-    if (est == MODEM_TIMEOUT)
-    {
-        return TX_SIN_RESPUESTA;
-    }
-    return TX_ERROR_MODEM;
+    return tx_desde_http(est, paso);
 }
 
 /**
@@ -408,6 +449,7 @@ void tarea_transmision(void *parametros)
     // Tamaño del buf que se pasa a anadir()
     static char cabecera[TAM_CABECERA_CSV];
     ciclo lectura;
+    modem_red_t red;
 
     // TABLA_SENSORES es const: la cabecera se genera una sola vez
     if (registro_csv_cabecera(cabecera, sizeof(cabecera)) == 0)
@@ -423,6 +465,11 @@ void tarea_transmision(void *parametros)
         imprimir_ciclo(&lectura);
 
         int tx = enviar_ciclo(&lectura);
+
+        // Antes de la SD (~2 s): la pantalla no tiene por que esperarla.
+        // Si modem_leer_red da TIMEOUT, red queda parcial y se publica igual
+        modem_leer_red(&red);
+        estado_sistema_publicar_red(&red, tx, (tx == TX_HTTP_OK), lectura.ts);
 
         if (cabecera[0] != '\0')
         {

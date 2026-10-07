@@ -25,10 +25,15 @@
 #include "pantalla_oled.h"
 #include "tarea_rtc.h"
 #include "tarea_pantalla.h"
+#include "registro_csv.h"
+#include "modem.h"
 
 #define REFRESCO_MS 1000
 #define SEGUNDOS_POR_PAGINA 5
 #define NUM_PAGINAS 2
+#define TAM_TEXTO_ENVIO 18 // 17 caracteres como maximo + '\0': con " !hh:mm" caben las 25 columnas
+
+static const char *TAG = "pantalla";
 
 /**
  * @brief Añade texto al final de una linea sin desbordarla.
@@ -219,32 +224,156 @@ static void pintar_sd(void)
 }
 
 /**
- * @brief Pagina 2: estado de la red movil (vacia hasta la fase del SIM7600) y de la SD.
+ * @brief Texto de la linea 4 de la pagina 2 segun el tx del ultimo envio (max. 17 caracteres).
+ */
+static void texto_envio(int tx, char *buf, size_t n)
+{
+    const char *t;
+
+    switch (tx)
+    {
+    case TX_HTTP_OK:
+        t = "ENVÍO OK";
+        break;
+    case TX_SIN_SIM:
+        t = "SIN SIM";
+        break;
+    case TX_SIN_RED:
+        t = "SIN RED";
+        break;
+    case TX_SIN_CONEXION:
+        t = "SIN DATOS";
+        break;
+    case TX_MODEM_NO_CONTESTA:
+        t = "MODEM NO CONTESTA";
+        break;
+    case TX_SIN_SERVIDOR:
+        t = "SIN SERVIDOR";
+        break;
+    case TX_ERROR_MODEM:
+        t = "ERROR MODEM";
+        break;
+    case TX_SIN_RESPUESTA:
+        t = "SIN RESPUESTA";
+        break;
+    case TX_TRAMA_NO_CABE:
+        t = "TRAMA NO CABE";
+        break;
+    case TX_HTTP_MAL_FORMADA:
+        t = "TRAMA RECHAZADA";
+        break;
+    case TX_HTTP_DESACTIVADO:
+        t = "NODO DESACTIVADO";
+        break;
+    case TX_HTTP_DUPLICADO:
+        t = "SEQ DUPLICADO";
+        break;
+    case TX_HTTP_ERROR_SERVIDOR:
+        t = "ERROR SERVIDOR";
+        break;
+    default:
+        snprintf(buf, n, "HTTP %d", tx);
+        return;
+    }
+    snprintf(buf, n, "%s", t);
+}
+
+/**
+ * @brief Accion de la linea 5. Vacia si nadie puede hacer nada en el sitio.
+ */
+static const char *accion_envio(int tx)
+{
+    switch (tx)
+    {
+    case TX_HTTP_OK:
+    case TX_SIN_SERVIDOR:
+    case TX_SIN_RESPUESTA:
+    case TX_HTTP_ERROR_SERVIDOR:
+        return "";
+    case TX_SIN_SIM:
+        return "revisar SIM";
+    case TX_SIN_RED:
+        return "revisar antena";
+    case TX_SIN_CONEXION:
+        return "revisar saldo de SIM";
+    default: // 4, 6, 8, 400, 403, 409 y cualquier otro codigo HTTP
+        return "avisar al tecnico";
+    }
+}
+
+/**
+ * @brief Lineas 2 a 5 de la pagina 2: operador, tecnologia, señal, IP y ultimo envio.
+ */
+static void pintar_red(void)
+{
+    char linea[PANTALLA_COLUMNAS + 1];
+    char texto[TAM_TEXTO_ENVIO];
+    char hora[6];
+    registro_red_t r;
+    size_t n;
+
+    if (estado_sistema_leer_red(&r) == false)
+    {
+        return;
+    }
+
+    // Antes del primer ciclo: como "SD SIN DATOS", sin hora ni accion
+    if (r.hay_datos == false)
+    {
+        pantalla_oled_texto(4, "RED SIN DATOS");
+        return;
+    }
+
+    // Linea 2: operador tecnologia señal (peor caso: 25 columnas). anadir() recorta, snprintf directo no compila
+    n = 0;
+    n = anadir(linea, sizeof(linea), n, "%s %s ",
+               (r.red.operador[0] != '\0') ? r.red.operador : "--",
+               (r.red.tecnologia[0] != '\0') ? r.red.tecnologia : "--");
+    if (r.red.dbm == MODEM_DBM_DESCONOCIDA)
+    {
+        n = anadir(linea, sizeof(linea), n, "--");
+    }
+    else
+    {
+        n = anadir(linea, sizeof(linea), n, "%ddBm", (int)r.red.dbm);
+    }
+    pantalla_oled_texto(2, linea);
+
+    // Linea 3
+    snprintf(linea, sizeof(linea), "IP %s", (r.red.ip[0] != '\0') ? r.red.ip : "--");
+    pantalla_oled_texto(3, linea);
+
+    // Linea 4: OK con la hora del envio; fallo con "!hh:mm" del ultimo 200
+    texto_envio(r.tx, texto, sizeof(texto));
+    estado_sistema_hora_legible(r.ultimo_ts_200, hora, sizeof(hora));
+    if (r.tx == TX_HTTP_OK)
+    {
+        snprintf(linea, sizeof(linea), "%s %s", texto, hora);
+    }
+    else
+    {
+        snprintf(linea, sizeof(linea), "%s !%s", texto, hora);
+    }
+    pantalla_oled_texto(4, linea);
+
+    // Linea 5
+    const char *accion = accion_envio(r.tx);
+
+    if (accion[0] != '\0')
+    {
+        snprintf(linea, sizeof(linea), "  %s", accion);
+        pantalla_oled_texto(5, linea);
+    }
+}
+
+/**
+ * @brief Pagina 2: reloj, red (lineas 2-5) y SD (lineas 6-7).
  */
 static void pintar_pagina_red(void)
 {
-    char linea[PANTALLA_COLUMNAS + 1];
-    estado_fuente_t e;
-
     pintar_reloj();
+    pintar_red();
     pintar_sd();
-
-    if (estado_sistema_leer(FUENTE_RED, &e) == true)
-    {
-        snprintf(linea, sizeof(linea), "%s: %s",
-                 (e.nombre != NULL) ? e.nombre : "Red",
-                 estado_sistema_texto(e.codigo));
-
-        pantalla_oled_texto(2, linea);
-
-        const char *accion = estado_sistema_accion(e.codigo);
-
-        if (accion[0] != '\0')
-        {
-            snprintf(linea, sizeof(linea), "  %s", accion);
-            pantalla_oled_texto(3, linea);
-        }
-    }
 }
 
 void tarea_pantalla(void *parametros)
@@ -281,7 +410,7 @@ void tarea_pantalla(void *parametros)
             segundos_en_pagina = 0;
             pagina = (pagina + 1) % NUM_PAGINAS;
         }
-
         vTaskDelay(pdMS_TO_TICKS(REFRESCO_MS));
     }
+    ESP_LOGI(TAG, "pila libre minima: %u B", (unsigned)uxTaskGetStackHighWaterMark(NULL));
 }

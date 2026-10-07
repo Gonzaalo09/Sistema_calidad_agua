@@ -34,7 +34,7 @@ QueueHandle_t uart_queue;
 #define RS485_TAM_COLA_EVENTOS 10 // eventos de la UART pendientes (uart_queue)
 
 // Poner a 0 tras la primera escritura correcta del RTC.
-#define FORZAR_HORA 0
+#define FORZAR_HORA 1
 
 static struct tm hora_compilacion_a_utc(void)
 {

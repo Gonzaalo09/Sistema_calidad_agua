@@ -40,20 +40,27 @@
 #define MODEM_TIMEOUT_REGISTRO_MS 120000 // Tiempo máximo total para registrarse en la red (2 min); pasado, el ciclo sigue sin red
 #define MODEM_SONDEO_REGISTRO_MS 1000    // Intervalo entre consultas del estado de registro mientras se espera
 
+#define MODEM_TAM_COMANDO 128        // El comando más largo es CNCFG o SHREQ, unos 50 B
+#define CNACT_ACTIVA 1               // <status> de AT+CNACT
+#define MODEM_TIMEOUT_CNACT_MS 85000 // Andamiaje. El V1.06 pone "-"; uso el máximo de la operación equivalente en la pila clásica (SAPBR=1, 7.2.1). Medir
+#define MODEM_SONDEO_CNACT_MS 1000
+#define MODEM_TIMEOUT_SHCONN_MS 70000 // Tiempo que tarda en encenderse
+#define MODEM_SHBODEXT_MS 1000        // Rango 100–10000 ms (9.2.5). 525 B a 115200 baudios tardan 46 ms
+#define MODEM_PAUSA_CUERPO_MS 100     // Los comandos contestan en ≤ 20 ms (medido en el 5.1), más margenLos comandos contestan en ≤ 20 ms (medido en el 5.1), más margen
+#define MODEM_TIMEOUT_SHREQ_MS 70000  // 60 s de SHCONF "TIMEOUT" más 10 s de margen para que llegue el +SHREQ del módem
+
+
 // Valores del campo <stat> de las respuestas de registro (AT+CREG?/CEREG?).
 #define STAT_SIN_LEER (-1) // Valor propio, no del módem: aún no se ha leído o no se pudo interpretar
 #define STAT_REG_CASA 1    // Registrado en la red de su operador
 #define STAT_DENEGADO 3    // Registro denegado por la red
 #define STAT_REG_ROAMING 5 // Registrado en otra red (roaming)
 
-#define MODEM_TAM_COMANDO 128        // El comando más largo es CNCFG o SHREQ, unos 50 B
-#define CNACT_ACTIVA 1               // <status> de AT+CNACT
-#define MODEM_TIMEOUT_CNACT_MS 85000 // Andamiaje. El V1.06 pone "-"; uso el máximo de la operación equivalente en la pila clásica (SAPBR=1, 7.2.1). Medir
-#define MODEM_SONDEO_CNACT_MS 1000
-#define MODEM_TIMEOUT_SHCONN_MS 60000 // Andamiaje. Valor por defecto de SHCONF "TIMEOUT" (9.2.2). Medir
-#define MODEM_SHBODEXT_MS 1000        // Rango 100–10000 ms (9.2.5). 525 B a 115200 baudios tardan 46 ms
-#define MODEM_PAUSA_CUERPO_MS 100     // Los comandos contestan en ≤ 20 ms (medido en el 5.1), más margenLos comandos contestan en ≤ 20 ms (medido en el 5.1), más margen
-#define MODEM_TIMEOUT_SHREQ_MS 70000  // 60 s de SHCONF "TIMEOUT" más 10 s de margen para que llegue el +SHREQ del módem
+// Sirve para mostrar por pantalla lo correcto
+#define MODEM_TAM_OPERADOR   11   // 10 visibles + '\0' (paso 5.5); se trunca aquí
+#define MODEM_TAM_TECNOLOGIA 7    // "NB-IOT" + '\0'
+#define MODEM_TAM_IP         16   // "255.255.255.255" + '\0'
+#define MODEM_DBM_DESCONOCIDA 0   // ningún valor de CSQ da 0 dBm
 
 typedef enum
 {
@@ -62,16 +69,54 @@ typedef enum
     MODEM_TIMEOUT
 } modem_estado_t;
 
+typedef enum
+{
+    MODEM_PASO_CONFIG,     // SHCONF (URL, BODYLEN, HEADERLEN)
+    MODEM_PASO_CONEXION,   // SHCONN Mira si la conexión HTPP está encendida 
+    MODEM_PASO_PETICION,   // SHAHEAD, SHBODEXT + cuerpo, envío de SHREQ(manda el POST)
+    MODEM_PASO_RESPUESTA   // espera de +SHREQ y lectura del código
+} modem_paso_t;
+
+typedef struct
+{
+    char operador[MODEM_TAM_OPERADOR];     // "" = sin dato
+    char tecnologia[MODEM_TAM_TECNOLOGIA]; // "GSM", "CAT-M", "NB-IOT" o ""
+    int16_t dbm;                           // MODEM_DBM_DESCONOCIDA = sin dato
+    char ip[MODEM_TAM_IP];                 // "" = sin conexión de datos
+} modem_red_t;
+
 modem_estado_t modem_init(void);
 
 modem_estado_t modem_encender(void);
 
+/**
+ * @brief Envía un comando AT al módem desde fuera del componente.
+ *
+ * Puerta pública de ejecutar() (static): la usan los componentes externos
+ * (tarea_transmision). Valida los punteros y delega con log_fallo a true.
+ *
+ * @param cmd        Comando sin terminador (p. ej. "AT+CPIN?").
+ * @param resp_out   Buffer donde se guarda la respuesta, siempre terminada en '\0'.
+ * @param tam_resp   Tamaño de resp_out en bytes (incluye el '\0').
+ * @param timeout_ms Tiempo máximo total de espera, en milisegundos.
+ *
+ * @return MODEM_OK       Llegó "\r\nOK\r\n".
+ * @return MODEM_ERROR    Puntero nulo o tam_resp 0; o lo que devuelve ejecutar(),
+ *                        (ERROR/+CME ERROR, respuesta que no cabe, fallo de UART).
+ * @return MODEM_TIMEOUT  No llegó ni OK ni error dentro de timeout_ms.
+ */
 modem_estado_t modem_comando(const char *cmd, char *resp_out, size_t tam_resp, uint32_t timeout_ms);
 
 modem_estado_t modem_apagar(void);
 
 modem_estado_t modem_abrir_datos(const char *apn, const char *usuario, const char *clave);
 
-modem_estado_t modem_http_post(const char *dominio, const char *ruta, const char *cuerpo, size_t len, int *codigo_out);
+modem_estado_t modem_http_post(const char *dominio, const char *ruta, const char *cuerpo, size_t len, int *codigo_out, modem_paso_t *paso_out);
+
+modem_estado_t modem_sondear_at(int intentos); 
+
+modem_estado_t modem_sim_lista(void);
+
+modem_estado_t modem_leer_red(modem_red_t *red);   // OK o TIMEOUT; los campos sin dato quedan vacíos
 
 #endif

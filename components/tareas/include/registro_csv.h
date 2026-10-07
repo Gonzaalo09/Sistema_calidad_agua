@@ -15,12 +15,22 @@
 
 #define TAM_TRAMA_JSON        768 // Max tamaño de la trama 
 
-#define TX_SIN_RED            1   // ni CEREG ni CGREG registrados
-#define TX_SIN_CONEXION       2   // no se pudo activar la conexión de datos (CNACT)
-#define TX_MODEM_NO_CONTESTA  3   // no se pudo leer el registro de ninguna red
-#define TX_ERROR_MODEM        4   // un comando SH* devolvió ERROR
-#define TX_SIN_RESPUESTA      5   // no llegó +SHREQ a tiempo   
-#define TX_TRAMA_NO_CABE      6   // el JSON no cabe en TAM_TRAMA_JSON
+// Son los números de los errores que te pueden salir, para traducir a la pantalla lo que está pasando
+#define TX_NO_INTENTADO        0
+#define TX_SIN_SIM             1
+#define TX_SIN_RED             2
+#define TX_SIN_CONEXION        3
+#define TX_MODEM_NO_CONTESTA   4
+#define TX_SIN_SERVIDOR        5
+#define TX_ERROR_MODEM         6
+#define TX_SIN_RESPUESTA       7
+#define TX_TRAMA_NO_CABE       8
+
+#define TX_HTTP_OK             200
+#define TX_HTTP_MAL_FORMADA    400
+#define TX_HTTP_DESACTIVADO    403
+#define TX_HTTP_DUPLICADO      409
+#define TX_HTTP_ERROR_SERVIDOR 500
 
 /**
  * @brief Genera la cabecera del CSV a partir de TABLA_SENSORES.

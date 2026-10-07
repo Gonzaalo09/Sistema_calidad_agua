@@ -8,6 +8,7 @@
 
 #include "esp_err.h"
 #include "sensores.h"
+#include "modem.h"
 
 enum 
 {
@@ -43,11 +44,31 @@ typedef struct estado_fuente_t {
     uint16_t fallos_consecutivos; 
 }estado_fuente_t;
 
+// Registro de red: lleva textos, que las filas (solo floats) no pueden guardar
+typedef struct registro_red_t {
+    bool hay_datos;          // false hasta el primer estado_sistema_publicar_red
+    modem_red_t red;         // operador, tecnologia, dBm e IP del ultimo ciclo
+    int tx;                  // codigo HTTP o TX_* del ultimo envio
+    uint32_t ultimo_ts_200;  // ts del ultimo envio con 200; 0 = nunca
+} registro_red_t;
+
 esp_err_t estado_sistema_init(void);
 
 void estado_sistema_publicar(size_t fuente, const float *valores, uint8_t num_valores, uint32_t ts, estado_codigo_t codigo); 
 
 bool estado_sistema_leer(size_t fuente, estado_fuente_t *destino);
+
+/**
+ * @brief Publica el estado de la red del ultimo ciclo.
+ *
+ * @param envio_ok true si tx es el 200 del servidor: solo entonces se actualiza ultimo_ts_200 con ts.
+ */
+void estado_sistema_publicar_red(const modem_red_t *red, int tx, bool envio_ok, uint32_t ts);
+
+/**
+ * @brief Copia el registro de red. Devuelve false si no se puede leer (antes del init o mutex ocupado).
+ */
+bool estado_sistema_leer_red(registro_red_t *destino);
 
 const char *estado_sistema_texto(estado_codigo_t codigo); 
 

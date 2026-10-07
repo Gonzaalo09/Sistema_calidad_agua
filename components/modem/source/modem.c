@@ -12,10 +12,21 @@
 
 #define MODEM_TROZO_LECTURA_MS 20 // latencia por lectura; el plazo total sigue siendo timeout_ms
 
+// Conversion de AT+CSQ a dBm (manual V1.06, 3.2.16): rssi 2..30 -> -110..-54 dBm
+#define CSQ_RSSI_MIN 2
+#define CSQ_RSSI_MAX 30
+#define CSQ_DBM_BASE (-114)  // dBm = CSQ_DBM_BASE + 2 * rssi
+#define CSQ_DBM_MIN (-115)   // rssi 0: -115 dBm o menos
+#define CSQ_DBM_RSSI_1 (-111) // rssi 1
+#define CSQ_DBM_MAX (-52)    // rssi 31: -52 dBm o mas
+
 static const char *TAG = "modem";
 
 // Comando para apagar el modem
 static const char CMD_APAGAR[] = "AT+CPOWD=1\r";
+
+// Buffer de consultar() y modem_sim_lista(). Un solo usuario: tarea_transmision
+static char resp_lectura[MODEM_TAM_RESPUESTA];
 
 /**
  * @brief Envía un comando AT al módem y espera su respuesta final.
@@ -35,15 +46,14 @@ static const char CMD_APAGAR[] = "AT+CPOWD=1\r";
  *                        no cabe en resp_out; o falló la escritura al UART.
  * @return MODEM_TIMEOUT  No llegó ni OK ni error dentro de timeout_ms.
  */
-static modem_estado_t ejecutar(const char *cmd, char *resp_out, size_t tam_resp,
-                               uint32_t timeout_ms, bool log_fallo)
+static modem_estado_t ejecutar(const char *cmd, char *resp_out, size_t tam_resp, uint32_t timeout_ms, bool log_fallo)
 {
     size_t n = 0;
     size_t hueco;
     int leidos;
     uint32_t t0 = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
     uint32_t transcurrido;
-    
+
     resp_out[0] = '\0';
 
     uart_flush_input(UART_NUM_1);
@@ -108,14 +118,14 @@ static modem_estado_t ejecutar(const char *cmd, char *resp_out, size_t tam_resp,
 
 static modem_estado_t enviar_linea(const char *cmd)
 {
-    uart_flush_input(UART_NUM_1);      // se vacía ANTES de enviar; después ya no
-    if ( uart_write_bytes(UART_NUM_1, cmd, strlen(cmd)) < 0)
+    uart_flush_input(UART_NUM_1); // se vacía ANTES de enviar; después ya no
+    if (uart_write_bytes(UART_NUM_1, cmd, strlen(cmd)) < 0)
     {
-        return MODEM_ERROR; 
+        return MODEM_ERROR;
     }
     if (uart_write_bytes(UART_NUM_1, "\r", 1) < 0)
     {
-        return MODEM_ERROR; 
+        return MODEM_ERROR;
     }
     return MODEM_OK;
 }
@@ -132,41 +142,138 @@ static modem_estado_t esperar_linea(const char *texto, char *resp, size_t tam, u
 
     while (((uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS) - t0) < timeout_ms)
     {
-        hueco = tam - 1 - n; 
+        hueco = tam - 1 - n;
         if (hueco == 0)
         {
-            ESP_LOGE(TAG, "respuesta mas larga que el buffer"); 
-            return MODEM_ERROR; 
+            ESP_LOGE(TAG, "respuesta mas larga que el buffer");
+            return MODEM_ERROR;
         }
 
         leidos = uart_read_bytes(UART_NUM_1, resp + n, hueco, pdMS_TO_TICKS(MODEM_TROZO_LECTURA_MS));
         if (leidos < 0)
         {
-            return MODEM_ERROR; 
-        }else 
+            return MODEM_ERROR;
+        }
+        else
         {
-            n += leidos; 
+            n += leidos;
             resp[n] = '\0';
 
-            p = strstr(resp, texto); 
+            p = strstr(resp, texto);
             if (p != NULL && strstr(p + strlen(texto), "\r\n") != NULL)
             {
-                ESP_LOGI(TAG, "-> %s", p); 
+                ESP_LOGI(TAG, "-> %s", p);
                 return MODEM_OK;
             }
 
             if ((strstr(resp, "\r\nERROR\r\n") || strstr(resp, "\r\n+CME ERROR:")))
             {
                 ESP_LOGW(TAG, "-> %s", resp);
-                return MODEM_ERROR; 
+                return MODEM_ERROR;
             }
         }
     }
     ESP_LOGW(TAG, "timeout esperando %s, recibido: %s", texto, resp);
     return MODEM_TIMEOUT;
 }
-// ----------------------------------------------------API_PUBLICA---------------------------------------------------------
 
+/**
+ * @brief Comprueba si la conexión de datos está activa (AT+CNACT?, manual V1.06, 5.2.30).
+ *
+ * Uso interno de `modem_abrir_datos`: al principio, para saltarse la activación si el
+ * módem ya la tiene de un ciclo anterior, y en el bucle de espera tras AT+CNACT=1,
+ * preguntando cada MODEM_SONDEO_CNACT_MS hasta que pase a activa.
+ *
+ * @param resp     Buffer de trabajo donde se guarda la respuesta del módem (lo pisa).
+ * @param tam_resp Tamaño de resp en bytes (incluye el '\0').
+ *
+ * @return true   La respuesta trae "+CNACT: <status>" con status = CNACT_ACTIVA.
+ * @return false  Status distinto, respuesta sin "+CNACT:" o el comando falló
+ *                (ERROR o timeout); no distingue entre estas causas.
+ */
+static bool app_network_activa(char *resp, size_t tam_resp)
+{
+    const char *p;
+    int estado;
+
+    if (ejecutar("AT+CNACT?", resp, tam_resp, MODEM_TIMEOUT_COMANDO_MS, true) != MODEM_OK)
+    {
+        return false;
+    }
+    // Localiza el inicio de la línea de interes
+    p = strstr(resp, "+CNACT:");
+    // la suma p + ... slata ese texto y apunta justo detrás, respuesta supuesta: CNACT: 1,"10.20.30.40"
+    if (p == NULL || sscanf(p + strlen("+CNACT:"), "%d", &estado) != 1)
+    {
+        return false;
+    }
+    return estado == CNACT_ACTIVA;
+}
+
+/**
+ * @brief Envia una consulta y localiza el prefijo de su respuesta.
+ *
+ * *dato apunta dentro de resp_lectura: la siguiente consulta lo pisa, asi que
+ * hay que interpretarlo antes de volver a llamar.
+ *
+ * @return MODEM_OK con *dato justo detras del prefijo; MODEM_ERROR si el modem
+ *         contesto ERROR o sin el prefijo; MODEM_TIMEOUT si no contesto.
+ */
+static modem_estado_t consultar(const char *cmd, const char *prefijo, const char **dato)
+{
+    modem_estado_t est;
+    const char *p;
+
+    *dato = NULL;
+
+    est = ejecutar(cmd, resp_lectura, sizeof(resp_lectura), MODEM_TIMEOUT_LECTURA_MS, true);
+    if (est != MODEM_OK)
+    {
+        return est;
+    }
+
+    p = strstr(resp_lectura, prefijo);
+    if (p == NULL)
+    {
+        return MODEM_ERROR;
+    }
+
+    *dato = p + strlen(prefijo); // con CSQ apunta a " 22,99\r\n..."
+    return MODEM_OK;
+}
+
+/**
+ * @brief Copia en buf el texto entre las dos primeras comillas. Si no hay comillas, buf no se toca.
+ */
+static void texto_entre_comillas(const char *desde, char *buf, size_t tam)
+{
+    const char *ini;
+    const char *fin;
+    size_t n;
+
+    ini = strchr(desde, '"');
+    if (ini == NULL)
+    {
+        return;
+    }
+
+    fin = strchr(ini + 1, '"');
+    if (fin == NULL)
+    {
+        return;
+    }
+
+    n = (size_t)(fin - (ini + 1));
+    if (n > tam - 1)
+    {
+        n = tam - 1; // aqui se corta el operador a lo que cabe en pantalla
+    }
+
+    memcpy(buf, ini + 1, n);
+    buf[n] = '\0';
+}
+
+// ----------------------------------------------------API_PUBLICA---------------------------------------------------------
 
 modem_estado_t modem_sondear_at(int intentos)
 {
@@ -233,7 +340,6 @@ modem_estado_t modem_init(void)
     return MODEM_OK;
 }
 
-
 modem_estado_t modem_encender(void)
 {
     uint32_t t0;
@@ -265,37 +371,18 @@ modem_estado_t modem_encender(void)
     return MODEM_TIMEOUT;
 }
 
+// Documentación en modem.h
 modem_estado_t modem_comando(const char *cmd, char *resp_out, size_t tam_resp, uint32_t timeout_ms)
 {
-    if (cmd == NULL || resp_out == NULL || tam_resp == 0 )
+    if (cmd == NULL || resp_out == NULL || tam_resp == 0)
     {
-        return MODEM_ERROR; 
+        return MODEM_ERROR;
     }
     return ejecutar(cmd, resp_out, tam_resp, timeout_ms, true);
 }
 
-// true si AT+CNACT? devuelve +CNACT: <status> con status = CNACT_ACTIVA (manual V1.06, 5.2.30)
-static bool app_network_activa(char *resp, size_t tam_resp)
-{
-    const char *p;
-    int estado;
-
-    if (ejecutar("AT+CNACT?", resp, tam_resp, MODEM_TIMEOUT_COMANDO_MS, true) != MODEM_OK)
-    {
-        return false;
-    }
-    // Localiza el inicio de la línea de interes
-    p = strstr(resp, "+CNACT:");
-    // la suma p + ... slata ese texto y apunta justo detrás, respuesta supuesta: CNACT: 1,"10.20.30.40"
-    if (p == NULL || sscanf(p + strlen("+CNACT:"), "%d", &estado) != 1)
-    {
-        return false;
-    }
-    return estado == CNACT_ACTIVA;
-}
-
 /**
- * Miras si la red está lista para recibir datos 
+ * Miras si la red está lista para recibir datos
  */
 modem_estado_t modem_abrir_datos(const char *apn, const char *usuario, const char *clave)
 {
@@ -352,7 +439,7 @@ modem_estado_t modem_abrir_datos(const char *apn, const char *usuario, const cha
     return MODEM_TIMEOUT;
 }
 
-modem_estado_t modem_http_post(const char *dominio, const char *ruta, const char *cuerpo, size_t len, int *codigo_out)
+modem_estado_t modem_http_post(const char *dominio, const char *ruta, const char *cuerpo, size_t len, int *codigo_out, modem_paso_t *paso_out)
 {
     static char resp[MODEM_TAM_RESPUESTA];
     static char cmd[MODEM_TAM_COMANDO];
@@ -364,6 +451,12 @@ modem_estado_t modem_http_post(const char *dominio, const char *ruta, const char
         return MODEM_ERROR;
     }
     *codigo_out = 0;
+
+    if (paso_out == NULL)
+    {
+        return MODEM_ERROR;
+    }
+    *paso_out = MODEM_PASO_CONFIG;
 
     if (dominio == NULL || ruta == NULL || cuerpo == NULL)
     {
@@ -397,21 +490,29 @@ modem_estado_t modem_http_post(const char *dominio, const char *ruta, const char
     // Abre la conexión con el servidor (9.2.3)
     if (est == MODEM_OK)
     {
+        *paso_out = MODEM_PASO_CONEXION;
         est = ejecutar("AT+SHCONN", resp, sizeof(resp), MODEM_TIMEOUT_SHCONN_MS, true);
     }
 
     // Cabecera y cuerpo (9.2.6 y 9.2.5): después de conectar
     if (est == MODEM_OK)
     {
+        *paso_out = MODEM_PASO_PETICION;
         // Guarda la cabecera Content-Type en el módem. Aún no se envía
-        est = ejecutar("AT+SHAHEAD=\"Content-Type\",\"application/json\"", resp, sizeof(resp),
+        est =ejecutar("AT+SHAHEAD=\"Content-Type\",\"application/json\"", resp, sizeof(resp),
                        MODEM_TIMEOUT_COMANDO_MS, true);
     }
     if (est == MODEM_OK)
     {
         // Avisa al módem: "te mando <len> bytes de cuerpo". Aún no es el cuerpo
-        snprintf(cmd, sizeof(cmd), "AT+SHBODEXT=%u,%u", (unsigned)len, (unsigned)MODEM_SHBODEXT_MS);
-        est = enviar_linea(cmd);
+        if (snprintf(cmd, sizeof(cmd), "AT+SHBODEXT=%u,%u", (unsigned)len, (unsigned)MODEM_SHBODEXT_MS) >= (int)sizeof(cmd))
+        {
+            est = MODEM_ERROR;
+        }
+        else
+        {
+            est = enviar_linea(cmd);
+        }
     }
     if (est == MODEM_OK)
     {
@@ -435,9 +536,18 @@ modem_estado_t modem_http_post(const char *dominio, const char *ruta, const char
     // POST (9.2.11): OK al momento y, más tarde, +SHREQ: "POST",<codigo>,<len>
     if (est == MODEM_OK)
     {
+        // Antes de lanzar SHREQ: un ERROR de SHREQ llega en la espera de +SHREQ:, no aquí
+        *paso_out = MODEM_PASO_RESPUESTA;
         // Lanza el POST: ahora el módem envía cabecera y cuerpo al servidor
-        snprintf(cmd, sizeof(cmd), "AT+SHREQ=\"%s\",3", ruta); // 3 = POST
-        est = enviar_linea(cmd);
+        // 3 = POST. Una ruta truncada mandaria el POST a otra URL
+        if (snprintf(cmd, sizeof(cmd), "AT+SHREQ=\"%s\",3", ruta) >= (int)sizeof(cmd))
+        {
+            est = MODEM_ERROR;
+        }
+        else
+        {
+            est = enviar_linea(cmd);
+        }
     }
     if (est == MODEM_OK)
     {
@@ -460,6 +570,125 @@ modem_estado_t modem_http_post(const char *dominio, const char *ruta, const char
     ejecutar("AT+SHDISC", resp, sizeof(resp), MODEM_TIMEOUT_COMANDO_MS, true);
 
     return est;
+}
+
+// Mira si la SIM está lista 
+modem_estado_t modem_sim_lista(void)
+{
+    modem_estado_t est;
+
+    // TIMEOUT = el modem no contesta; ERROR = +CME ERROR: 10, sin SIM
+    est = ejecutar("AT+CPIN?", resp_lectura, sizeof(resp_lectura), MODEM_TIMEOUT_CPIN_MS, true);
+    if (est != MODEM_OK)
+    {
+        return est;
+    }
+
+    // SIM PIN, SIM PUK...: contesta OK pero la SIM no sirve, devuelve NULL si no encuentra string2
+    if (strstr(resp_lectura, "+CPIN: READY") == NULL)
+    {
+        return MODEM_ERROR;
+    }
+
+    return MODEM_OK;
+}
+
+modem_estado_t modem_leer_red(modem_red_t *red)
+{
+    modem_estado_t est;
+    const char *d;
+    int rssi;
+    int ber;
+    int estado;
+
+    if (red == NULL)
+    {
+        return MODEM_ERROR;
+    }
+
+    memset(red, 0, sizeof(*red)); // todo "sin dato"; dbm = MODEM_DBM_DESCONOCIDA
+
+    // Operador (3.2.9): +COPS: 0,0,"Claro",3
+    est = consultar("AT+COPS?", "+COPS:", &d);
+    if (est == MODEM_TIMEOUT)
+    {
+        return MODEM_TIMEOUT;
+    }
+    if (est == MODEM_OK)
+    {
+        texto_entre_comillas(d, red->operador, sizeof(red->operador));
+    }
+
+    // Tecnologia (5.2.21): +CPSI:( *AQUÍ )GSM,Online,...
+    est = consultar("AT+CPSI?", "+CPSI:", &d);
+    if (est == MODEM_TIMEOUT)
+    {
+        return MODEM_TIMEOUT;
+    }
+    if (est == MODEM_OK)
+    {
+        // Consultar deja justo despés de lso dos puntos( * ), se los salta hasta que apunta a la respuesta
+        while (*d == ' ')
+        {
+            d++;
+        }
+
+        // Devuelve si son iguales o no 
+        if (strncmp(d, "GSM", 3) == 0)
+        {
+            snprintf(red->tecnologia, sizeof(red->tecnologia), "GSM");
+        }
+        else if (strncmp(d, "LTE CAT-M1", 10) == 0)
+        {
+            snprintf(red->tecnologia, sizeof(red->tecnologia), "CAT-M");
+        }
+        else if (strncmp(d, "LTE NB-IOT", 10) == 0)
+        {
+            snprintf(red->tecnologia, sizeof(red->tecnologia), "NB-IOT");
+        }
+        // "NO SERVICE" u otro: se queda ""
+    }
+
+    // Senal (3.2.16): +CSQ: 22,99
+    est = consultar("AT+CSQ", "+CSQ:", &d);
+    if (est == MODEM_TIMEOUT)
+    {
+        return MODEM_TIMEOUT;
+    }
+    // sscanf lee los valores que hay en d que es la respuesta a AT+CSQ, y te da los valores de la respuesta
+    if ((est == MODEM_OK) && (sscanf(d, "%d,%d", &rssi, &ber) == 2))
+    {
+        if (rssi == 0)
+        {
+            red->dbm = CSQ_DBM_MIN;
+        }
+        else if (rssi == 1)
+        {
+            red->dbm = CSQ_DBM_RSSI_1;
+        }
+        else if ((rssi >= CSQ_RSSI_MIN) && (rssi <= CSQ_RSSI_MAX))
+        {
+            red->dbm = (int16_t)(CSQ_DBM_BASE + 2 * rssi);
+        }
+        else if (rssi == 31)
+        {
+            red->dbm = CSQ_DBM_MAX;
+        }
+        // 99 = desconocida: se queda MODEM_DBM_DESCONOCIDA
+    }
+
+    // IP (5.2.30): +CNACT: 1,"100.81.197.154"
+    est = consultar("AT+CNACT?", "+CNACT:", &d);
+    if (est == MODEM_TIMEOUT)
+    {
+        return MODEM_TIMEOUT;
+    }
+    if ((est == MODEM_OK) && (sscanf(d, "%d", &estado) == 1) && (estado == CNACT_ACTIVA))
+    {
+        texto_entre_comillas(d, red->ip, sizeof(red->ip));
+    }
+
+    return MODEM_OK; // un dato que falta (sin operador, 99...) no es un fallo
 }
 
 modem_estado_t modem_apagar(void)
