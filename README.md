@@ -1,9 +1,10 @@
-# Nodo sensor ESP32 — Modbus RTU + RTC + OLED
+# Nodo sensor ESP32 — Modbus RTU + RTC + OLED + red móvil
 
 Firmware ESP-IDF para un nodo sensor de campo. Consulta sensores
 ambientales por Modbus RTU sobre RS-485, sella cada medida con la hora de
-un RTC DS3231 y muestra en una pantalla OLED los últimos valores y el
-estado de cada componente en lenguaje llano.
+un RTC DS3231, la guarda en una microSD, la envía por red móvil a un
+servidor y muestra en una pantalla OLED los últimos valores y el estado de
+cada componente en lenguaje llano.
 
 TFG de Ingeniería de Telecomunicaciones (UPM, rama electrónica), dentro de
 un proyecto de cooperación internacional con despliegue en Perú. El nodo lo
@@ -21,31 +22,50 @@ un ordenador**, mirando la pantalla del nodo o los datos transmitidos.
 | 4a. Bring-up de la pantalla OLED | Validada en hardware (DevKit) |
 | 4b. Tabla de estado y pantallas de diagnóstico | Validada en hardware (DevKit) |
 | Migración a la LilyGo T-SIM7000G (sin transmisión) | Cerrada (30/09/2026). Sensores comprobados (RS-485 en TX=GPIO19, RX=GPIO18). Pendiente de comprobar: funcionamiento solo con batería |
-| 5. Transmisión remota (SIM7000G por LTE-M; después SIM7600G) | En curso (02/10/2026). Validados en la T-SIM7000G: bring-up del módem, registro en la red y envío de cada ciclo por HTTP (5.1, 5.2 y 5.3+5.4). Pendiente: prueba sin antena y pantalla de red (5.5) |
-| 6. Almacenamiento en microSD | Validada en hardware (DevKit) |
-| 7. Gestión de energía (deep sleep, solar) | Pendiente |
-| 8. Sincronización temporal (GNSS/NTP) | Pendiente |
+| 5. Transmisión remota (SIM7000G; después SIM7600G) | **Cerrada (16/10/2026)**. Validada en banco y en una prueba de campo en una piscifactoría (solo 2G): encendido del módem, registro en la red, envío de cada ciclo por HTTP con su resultado en `tx`, y página de red en la pantalla |
+| 6. Almacenamiento en microSD | Validada en hardware (DevKit y T-SIM7000G) |
+| 8. Sincronización temporal (GNSS/red móvil) | **Siguiente** (pendiente de diseño) |
+| 9. Comunicación LoRa entre nodos (gateway con SIM) | Pendiente de diseño. Va antes que la fase 7. Topología decidida (17/10/2026): ver "Despliegue previsto" |
+| 7. Gestión de energía (deep sleep, solar) | Pendiente. Después de LoRa |
 
-Última validación (29/09/2026, en el DevKit): cada ciclo de medida se
-guarda como una línea en un archivo CSV por día en la microSD, que se abre
-en Excel. El archivo continúa tras un reinicio, se abre uno nuevo si
-cambian los sensores, las medidas sin hora van a un archivo aparte, y al
-sacar y volver a meter la tarjeta el nodo sigue escribiendo solo. La
-pantalla muestra el ID del nodo junto al reloj y el estado de la tarjeta
-con la hora del último guardado.
+Orden de las fases que quedan (decidido 16/10/2026): sincronización →
+LoRa → energía.
 
-Migración (30/09/2026): el firmware arranca en la T-SIM7000G (chip
-revisión v1.0, flash de 4 MB, ID `F8C7F0`) con RTC, pantalla y microSD
-funcionando en el slot de la placa, y los sensores respondiendo con el
-RS-485 en TX=GPIO19, RX=GPIO18. Queda por comprobar que el nodo funcione
-solo con la batería.
+### Despliegue previsto (decidido 17/10/2026)
 
-Transmisión (02/10/2026, placa `AC3D04`, SIM de Claro Perú): el nodo
-enciende el módem, se registra en la red y envía cada ciclo como JSON por
-HTTP al servidor; el servidor responde 200 y la medida aparece en la base
-de datos. En la prueba, el módem no encontró LTE-M ni NB-IoT y se registró
-en **GSM** (GPRS): un envío completo tarda 2–3 s. Ver "Transmisión de
-datos".
+Seis nodos LilyGo T-SIM7600G en dos grupos de tres, uno a cada lado de
+una montaña. Entre los dos lados no hay visión directa, así que los
+grupos no se comunican entre sí.
+
+```
+Lado A                                   Lado B
+nodo ──LoRa──┐                           ┌──LoRa── nodo
+             gateway A (SIM)   gateway B (SIM)
+nodo ──LoRa──┘      │                │   └──LoRa── nodo
+                    └── red móvil ───┴──> servidor
+```
+
+- En cada grupo, un **gateway** con SIM y dos nodos sin SIM. Los nodos
+  mandan sus medidas por LoRa al gateway de su lado.
+- Cada gateway guarda en su microSD lo que recibe y lo sube al servidor
+  junto con sus propias medidas. Los dos lados tienen cobertura móvil.
+- Los dos gateways sacan la hora de una referencia externa (UTC) y la
+  pasan a sus nodos. Así los dos lados quedan en la misma hora sin
+  hablar entre sí.
+- Los seis nodos llevan módem: los que no tienen SIM tampoco transmiten
+  por red móvil, pero el módem sigue teniendo GNSS.
+
+Prueba de campo (16/10/2026, placa `AC3D04`, SIM de Claro Perú, en una
+piscifactoría): solo había cobertura 2G. El nodo se registró, envió los
+datos al servidor, mostró en pantalla los errores al quitar los sensores y
+el RTC (`SIN HORA`), y guardó los ciclos en la microSD, que se leyó
+después en el ordenador.
+
+Transmisión (banco, 02–04/10/2026, placa `AC3D04`): el nodo enciende el
+módem, se registra en la red y envía cada ciclo como JSON por HTTP al
+servidor; el servidor responde 200 y la medida aparece en la base de
+datos. El módem no encontró LTE-M ni NB-IoT y se registró en **GSM**
+(GPRS): un envío completo tarda 2–3 s. Ver "Transmisión de datos".
 
 ## Hardware
 
@@ -69,7 +89,7 @@ de `main.c` y `tarjeta_sd.c` y reescribir la parte del módem.
 | Elemento | Detalle |
 |---|---|
 | RS-485 | Módulo RS485-TTL con auto-dirección, alimentado a 3,3 V. UART2 a 9600 8N1. DevKit: TX=GPIO17, RX=GPIO16. **T-SIM7000G: TX=GPIO19, RX=GPIO18** (16 y 17 están ocupados por la PSRAM del WROVER). Los pines `TX`/`RX` del header son la consola (UART0): no conectar ahí el RS-485 |
-| Módem (T-SIM7000G, fase 5) | SIM7000G por UART1 a 115200: TX del ESP32=GPIO27, RX=GPIO26; encendido (PWRKEY) por GPIO4. No conectar nada a los pines 4 y 25 del header. Hace falta SIM con datos y antena conectada |
+| Módem (T-SIM7000G) | SIM7000G por UART1 a 115200: TX del ESP32=GPIO27, RX=GPIO26; encendido (PWRKEY) por GPIO4. No conectar nada a los pines 4 y 25 del header. Hace falta SIM con datos y antena conectada |
 | Bus I2C | I2C_NUM_0, SDA=GPIO21, SCL=GPIO22 (igual en las dos placas) |
 | RTC | DS3231 (0x68) con pila CR2032, 3,3 V. EEPROM 24C32 del módulo en 0x57 |
 | OLED | SSD1306 128×64 de 0,96" (0x3C), 3,3 V |
@@ -91,17 +111,20 @@ de `main.c` y `tarjeta_sd.c` y reescribir la parte del módem.
 - La placa puede reiniciarse al conectar o desconectar el USB con la
   batería puesta. Es normal (no hay conmutación sin cortes).
 - Los sensores siguen a 12 V con su propia fuente. GND común con la placa.
+- No conectar ni desconectar módulos de la alimentación de 3V3 con el nodo
+  encendido: al quitar el RTC en caliente la placa se reinició por caída de
+  tensión (04/10/2026).
 
 ## Arquitectura
 
 ```
-app_main ── UART2, estado_sistema, config_nodo (NVS), bus I2C, RTC, OLED, SD ── crea las tareas
+app_main ── UART2, estado_sistema, config_nodo (NVS), bus I2C, RTC, OLED, SD, módem ── crea las tareas
 
 tarea_polling (5) ──cola_lecturas (1 elemento por ciclo)──> tarea_transmision (3) ──┬── modem ── servidor (HTTP)
-      │                                                                             └── tarjeta_sd
-      ├── RTC (DS3231) ──────┐
-      ▼                      ├── I2C_bus
-   estado_sistema            │
+      │                                                          │                  └── tarjeta_sd
+      ├── RTC (DS3231) ──────┐                                   │ (estado de la red y de la SD)
+      ▼                      ├── I2C_bus                         ▼
+   estado_sistema  <─────────┼───────────────────────────────────┘
       ▲                      │
       └── tarea_pantalla (2) ─┴── pantalla_oled ── u8g2
 
@@ -112,7 +135,8 @@ tarea_rtc (2, depuracion)
 completo de medida: la hora, el número `seq` y, por cada sensor, su estado
 y sus valores (o ninguno si falló). Los demás lectores usan
 `estado_sistema`, una tabla compartida protegida con mutex en la que cada
-fuente publica su último valor, su estado y cuándo funcionó por última vez.
+fuente publica su último valor, su estado y cuándo funcionó por última vez,
+más un registro aparte con los datos de la red móvil.
 
 ### Componentes
 
@@ -122,13 +146,13 @@ fuente publica su último valor, su estado y cuándo funcionó por última vez.
 | `sensores` | `TABLA_SENSORES` y el descriptor de cada sensor |
 | `config_nodo` | ID del nodo (sacado de la MAC del chip) y número de ciclo `seq`, guardado en la memoria interna (NVS) |
 | `tarjeta_sd` | Tarjeta microSD por SPI con sistema de archivos FAT: montar, desmontar, escribir. Nunca formatea |
-| `modem` | SIM7000G por comandos AT sobre UART1: encender, apagar, enviar un comando, abrir la conexión de datos y hacer un POST HTTP (devuelve el código del servidor) |
+| `modem` | SIM7000G por comandos AT sobre UART1: encender, apagar, enviar un comando, comprobar la SIM, abrir la conexión de datos, hacer un POST HTTP (devuelve el código del servidor o en qué paso falló) y leer los datos de la red (operador, tecnología, señal, IP) |
 | `I2C_bus` | Dueño único del bus I2C; cada chip registra su propio dispositivo |
 | `RTC` | Driver propio del DS3231 en tres capas, siempre en UTC |
 | `pantalla_oled` | Driver del SSD1306 sobre U8g2: callbacks de I2C y esperas, y primitivas de dibujo por líneas |
 | `u8g2` | Librería de terceros (olikraus, BSD), copiada al repo para poder compilar sin internet |
-| `estado_sistema` | Tabla de estado por fuente, con mutex |
-| `tareas` | `tarea_polling`, `tarea_transmision`, `tarea_rtc` y `tarea_pantalla`, el tipo `ciclo` de la cola, y `registro_csv` (formato de la línea CSV y de la trama JSON) |
+| `estado_sistema` | Tabla de estado por fuente, con mutex, y registro de la red |
+| `tareas` | `tarea_polling`, `tarea_transmision`, `tarea_rtc` y `tarea_pantalla`, el tipo `ciclo` de la cola, y `registro_csv` (formato de la línea CSV, de la trama JSON y códigos de `tx`) |
 
 ### Añadir o modificar un sensor
 
@@ -136,10 +160,10 @@ Solo se toca `sensores.c`: se añade una fila a `TABLA_SENSORES`, se
 recompila y se graba. El número de sensores se calcula en compilación y un
 `_Static_assert` corta el build si se supera el máximo.
 
-Cada magnitud se identifica en los archivos de la microSD (y, desde la
-fase 5, en los datos transmitidos) por su nombre de columna,
-`nombre_fuente` + magnitud (por ejemplo `NPK_Nitrogeno` u
-`OD_temperatura`). De ahí salen estas reglas para quien mantenga el nodo:
+Cada magnitud se identifica en los archivos de la microSD y en los datos
+transmitidos por su nombre de columna, `nombre_fuente` + magnitud (por
+ejemplo `NPK_Nitrogeno` u `OD_temperatura`). De ahí salen estas reglas
+para quien mantenga el nodo:
 
 - **Si se cambia el `nombre_fuente` de un sensor que ya existe, para la
   base de datos será un sensor distinto**: el histórico queda guardado con
@@ -215,17 +239,19 @@ usando la configuración regional Inglés (Estados Unidos)).
 
 ## Transmisión de datos
 
-En cada ciclo, `tarea_transmision` construye la trama, la envía y después
-guarda la línea en la microSD con el resultado en la columna `tx`. Un solo
-intento por ciclo: lo que falle queda en la tarjeta con su `tx`.
+En cada ciclo, `tarea_transmision` construye la trama, la envía, lee el
+estado de la red para la pantalla y después guarda la línea en la microSD
+con el resultado en la columna `tx`. Un solo intento por ciclo: lo que
+falle queda en la tarjeta con su `tx`.
 
 1. Trama: un objeto JSON plano con las mismas claves que las columnas del
    CSV, salvo `fecha` y `tx`. Un sensor que falla, o un valor que no es un
    número, va como `null`.
-2. Se comprueba el registro en la red (`AT+CEREG?` para LTE y `AT+CGREG?`
+2. Se comprueba que la SIM está lista (`AT+CPIN?`).
+3. Se comprueba el registro en la red (`AT+CEREG?` para LTE y `AT+CGREG?`
    para GSM). Sin red no se intenta la conexión de datos.
-3. Se activa la conexión de datos (APN de la SIM) si no lo estaba.
-4. POST HTTP al servidor (`DOMINIO_SERVIDOR` y `RUTA_MEDIDAS` en
+4. Se activa la conexión de datos (APN de la SIM) si no lo estaba.
+5. POST HTTP al servidor (`DOMINIO_SERVIDOR` y `RUTA_MEDIDAS` en
    `tarea_transmision.c`). Sin seguridad por ahora: HTTP sin `s` y sin clave.
 
 El módem se enciende al arrancar y **se queda encendido y registrado entre
@@ -234,34 +260,37 @@ sleep, es de la fase 7).
 
 ### Valor de `tx`
 
-| `tx` | Significado | ¿Se reenviará más adelante? |
-|---|---|---|
-| 0 | No intentado | — |
-| 200 | Guardado en el servidor (o ya estaba) | No |
-| 400 | El servidor rechaza la trama: falta `nodo`, `seq`, `ts` o `rtc` | No |
-| 403 | Dispositivo desactivado en la plataforma | No |
-| 409 | Mismo `(nodo, seq)` con otro contenido: va a incidencias | No |
-| 500 | Error del servidor o de su base de datos | Sí |
-| 1 | Sin red (ni LTE ni GSM registrados) | Sí |
-| 2 | No se pudo activar la conexión de datos | Sí |
-| 3 | El módem no contesta | Sí |
-| 4 | El módem devolvió error durante el envío | Sí |
-| 5 | No llegó la respuesta del servidor a tiempo | Sí |
-| 6 | La trama no cabe en el buffer | Sí |
+| `tx` | Significado | En pantalla | ¿Se reenviará más adelante? |
+|---|---|---|---|
+| 0 | No intentado | — | — |
+| 200 | Guardado en el servidor (o ya estaba) | `ENVÍO OK hh:mm` | No |
+| 400 | El servidor rechaza la trama: falta `nodo`, `seq`, `ts` o `rtc` | `TRAMA RECHAZADA` / `avisar al tecnico` | No |
+| 403 | Dispositivo desactivado en la plataforma | `NODO DESACTIVADO` / `avisar al tecnico` | No |
+| 409 | Mismo `(nodo, seq)` con otro contenido: va a incidencias | `SEQ DUPLICADO` / `avisar al tecnico` | No |
+| 500 | Error del servidor o de su base de datos | `ERROR SERVIDOR` | Sí |
+| 1 | La SIM no está lista | `SIN SIM` / `revisar SIM` | Sí |
+| 2 | Sin red (ni LTE ni GSM registrados) | `SIN RED` / `revisar antena` | Sí |
+| 3 | No se pudo activar la conexión de datos | `SIN DATOS` / `revisar saldo de SIM` | Sí |
+| 4 | El módem no contesta | `MODEM NO CONTESTA` / `avisar al tecnico` | Sí |
+| 5 | No se pudo conectar con el servidor | `SIN SERVIDOR` | Sí |
+| 6 | El módem devolvió error durante el envío | `ERROR MODEM` / `avisar al tecnico` | Sí |
+| 7 | No llegó la respuesta del servidor a tiempo | `SIN RESPUESTA` | Sí |
+| 8 | La trama no cabe en el buffer | `TRAMA NO CABE` / `avisar al tecnico` | No |
 
-Los códigos 1 a 6 son **provisionales**: están en `registro_csv.h` pero
-sus valores definitivos no están confirmados. El reenvío desde la tarjeta
-todavía no existe.
+Estos valores viajan en la tarjeta: no se cambian ni se reutilizan; los
+nuevos se añaden con un número nuevo. El reenvío desde la tarjeta todavía
+no existe.
 
-### Datos medidos en la prueba (T-SIM7000G `AC3D04`, SIM Claro Perú)
+### Datos medidos (T-SIM7000G `AC3D04`, SIM Claro Perú)
 
-- Sin LTE-M ni NB-IoT en el sitio de prueba: registro en GSM a los 69 s del
-  arranque del módem. Cobertura LTE-M de Claro Perú: sin verificar.
+- Sin LTE-M ni NB-IoT en el banco ni en la piscifactoría: registro en GSM.
+  Desde el módem apagado, a los 69 s; con el módem ya encendido, en
+  segundos. Cobertura LTE-M de Claro Perú: sin verificar.
 - Envío completo por GPRS: 2–3 s. Con GPRS el módem puede pedir picos de
   2 A (0,6 A en LTE-M): con batería baja puede reiniciar la placa.
 - Sin antena, el registro se da por perdido a los 120 s y los ciclos
-  siguen guardándose en la tarjeta. Falta la prueba sin antena con el nodo
-  en marcha.
+  siguen guardándose en la tarjeta. Al poner la antena con el nodo en
+  marcha, el siguiente ciclo se envía sin reiniciar.
 
 ## Conectar la placa al ordenador (una vez por PC)
 
@@ -305,9 +334,9 @@ al ordenador").
 1. **Poner en hora el RTC** (si es un RTC nuevo o se ha quedado sin pila):
    ver "Primera puesta en hora del RTC" en Compilación.
 2. **Sacar la microSD** (T-SIM7000G), **borrar la memoria del ESP32 y
-   grabar el firmware definitivo**, para que el contador de ciclos `seq`
-   empiece en 1 y no arrastre los números de las pruebas ni datos del
-   firmware de fábrica:
+   grabar el firmware definitivo** (con `FORZAR_HORA 0`), para que el
+   contador de ciclos `seq` empiece en 1 y no arrastre los números de las
+   pruebas ni datos del firmware de fábrica:
    ```
    idf.py -p COMx erase-flash
    idf.py -p COMx flash
@@ -321,7 +350,9 @@ al ordenador").
    la placa nueva trae un ID nuevo y hay que actualizar la etiqueta.
 4. **Formatear la tarjeta microSD** en FAT32 (ver arriba) y volver a
    meterla.
-5. Si el nodo va a **otro país que no sea Perú**, hacer antes los cambios
+5. **Dar de alta el nodo en la plataforma del servidor** con su ID. Si no,
+   el servidor responde 403 (`NODO DESACTIVADO` en pantalla).
+6. Si el nodo va a **otro país que no sea Perú**, hacer antes los cambios
    de "Desplegar en otro país".
 
 **Una vez desplegado, no volver a usar `erase-flash` en ese nodo**: el
@@ -340,7 +371,7 @@ proyecto algo más que dependa del país, se apunta aquí.
 | Desfase horario del país | Firmware: `OFFSET_PAIS_S` en `tarea_rtc.h` (componente `tareas`) | Horas respecto a UTC × 3600, con signo. Perú (UTC−5): `(-5 * 3600)`. Ejemplo, Bolivia (UTC−4): `(-4 * 3600)` |
 | El mismo desfase en el servidor | Servidor: campo `desfase_s` del nodo en la tabla de nodos | El mismo valor en segundos (Perú: `-18000`). Si no coincide con el del firmware, el servidor calculará mal la hora de todas las medidas de ese nodo |
 | Puesta en hora del RTC | PC con el que se compila con `FORZAR_HORA 1` | Toma la hora del PC y le resta `OFFSET_PAIS_S`: el reloj del PC tiene que estar en la hora del país de destino al compilar |
-| Red móvil | Tarjeta SIM y firmware: `APN_RED`, `USUARIO_APN` y `CLAVE_APN` en `tarea_transmision.c` (hoy Claro Perú: `claro.pe`, `claro`, `claro`) | SIM de un operador local, con su APN, usuario y contraseña. Comprobar que el operador ofrece LTE-M en la zona y que el módem de la placa admite sus bandas: SIM7000G Cat-M1 en B1/B2/B3/B4/B5/B8/B12/B13/B18/B19/B20/B26/B28/B39 (SIMCom, Hardware Design V1.07); SIM7600G, sin verificar. Cobertura LTE-M en Perú: sin verificar |
+| Red móvil | Tarjeta SIM y firmware: `APN_RED`, `USUARIO_APN` y `CLAVE_APN` en `tarea_transmision.c` (hoy Claro Perú: `claro.pe`, `claro`, `claro`) | SIM de un operador local, con su APN, usuario y contraseña. Comprobar qué tecnología hay en la zona y que el módem de la placa admite sus bandas: SIM7000G Cat-M1 en B1/B2/B3/B4/B5/B8/B12/B13/B18/B19/B20/B26/B28/B39 (SIMCom, Hardware Design V1.07), además de GSM/GPRS; SIM7600G, sin verificar. En Perú, en los sitios probados, solo había 2G |
 | Servidor de datos | Firmware: `DOMINIO_SERVIDOR` y `RUTA_MEDIDAS` en `tarea_transmision.c` | Dominio (`http://dominio`, máx. 64 caracteres) y ruta de la API que recibe las medidas. El nodo debe estar dado de alta y activo en esa plataforma, o el servidor responde 403 |
 | Idioma de la pantalla | Firmware: `estado_sistema.c` (`estado_sistema_texto`, `estado_sistema_accion`) y `tarea_pantalla.c` | Los mensajes están en español. Cada acción cabe en 23 caracteres. La fuente admite acentos y ñ (Latin-1), no otros alfabetos |
 
@@ -361,18 +392,29 @@ de las dos es el reloj (día/mes y hora con segundos) y el ID del nodo: si
 los segundos se quedan parados, el firmware está colgado.
 
 ```
-29/09 16:41:10 ID:125010     29/09 16:41:15 ID:125010
+16/10 16:41:10 ID:AC3D04     16/10 16:41:15 ID:AC3D04
 
-NPK  84.0 117.0 235.0        Red: SIN DATOS
-OD   8.6 27.0 !16:20
-  OD: revisar cable/12V
+NPK  84.0 117.0 235.0        Claro GSM -60dBm
+OD   8.6 27.0 !16:20         IP 100.74.207.3
+  OD: revisar cable/12V      ENVÍO OK 16:41
 pH   7.7 27.1
 
                              SD OK, guardado 16:41
 ```
 
-Un sensor averiado conserva sus últimos valores buenos, marcados con la
-hora a la que se tomaron, y añade debajo la acción concreta a realizar.
+Página 1: un sensor averiado conserva sus últimos valores buenos, marcados
+con la hora a la que se tomaron, y añade debajo la acción concreta a
+realizar.
+
+Página 2: operador, tecnología y señal de la red móvil; dirección IP (`IP
+--` sin conexión de datos); resultado del último envío y, si hay algo que
+se pueda arreglar en el sitio, la acción debajo (ver la tabla de `tx`).
+Si un envío falla, aparece la hora del último envío correcto, por ejemplo:
+
+```
+SIN RED !16:20
+  revisar antena
+```
 
 La línea de la SD dice la hora del último guardado correcto. Si la tarjeta
 falla, muestra el fallo con esa hora y debajo qué hacer, por ejemplo:
@@ -382,8 +424,9 @@ SD NO DETECTADA !16:20
   meter o cambiar SD
 ```
 
-`!--:--` significa que no se ha guardado nada desde que se encendió el
-nodo. Sin hora en el RTC, la primera línea es `-- SIN HORA -- ID:125010`.
+`!--:--` significa que no se ha guardado (o enviado) nada desde que se
+encendió el nodo. Sin hora en el RTC, la primera línea es
+`-- SIN HORA -- ID:AC3D04`.
 
 ## Convención de tiempo
 
@@ -406,13 +449,20 @@ idf.py -p COMx flash monitor
 
 Tras añadir un componente nuevo, ejecutar antes `idf.py reconfigure`.
 
+Abrir el monitor reinicia la placa. Para ver el log sin reiniciarla:
+`idf.py -p COMx monitor --no-reset`.
+
 ### Configuración del proyecto (menuconfig)
 
-La configuración de ESP-IDF está guardada en el archivo `sdkconfig` del
-proyecto, que va en el repositorio: quien clona el proyecto ya la tiene y
-no necesita abrir menuconfig. Esta tabla dice qué opciones necesita el
-nodo y por qué, para comprobarlas si se regenera `sdkconfig` o se cambia de
-placa.
+La configuración de ESP-IDF está en dos archivos del repositorio:
+`sdkconfig` (completa, generada por menuconfig) y `sdkconfig.defaults`
+(solo las opciones que el nodo cambia respecto a los valores por
+defecto). Quien clona el proyecto ya tiene la configuración y no
+necesita abrir menuconfig. Al cambiar una opción en menuconfig, ejecutar
+después `idf.py save-defconfig` y guardar los dos archivos juntos. Al
+pasar a otra versión de ESP-IDF, borrar `sdkconfig` y compilar: se
+regenera a partir de `sdkconfig.defaults`. Esta tabla dice qué opciones
+necesita el nodo y por qué.
 
 menuconfig se abre en el ordenador, **sin la placa conectada**: edita
 `sdkconfig`, y los cambios llegan a la placa al compilar y grabar.
@@ -428,10 +478,21 @@ Configuration Editor" de la extensión ESP-IDF). Se navega con las flechas,
 | Component config → ESP PSRAM → Support for external, SPI-connected RAM | **Desactivada** (por defecto) | El firmware no necesita la RAM externa. Pendiente de decisión definitiva |
 | Component config → FAT Filesystem support → Long filename support | **Activada** (cualquier modo salvo "No long filenames") | Los archivos de la SD tienen nombres largos (`125010_2026-09-29.csv`). Sin esto no se pueden crear |
 
-Primera puesta en hora del RTC: compilar con `FORZAR_HORA 1` en `main.c`,
-comprobar la hora en el log, y volver a compilar con `FORZAR_HORA 0` para
-que los siguientes arranques conserven la hora. El PC que compila debe
-estar en la zona horaria del país de despliegue.
+### Primera puesta en hora del RTC
+
+`FORZAR_HORA 1` en `main.c` pone el RTC a la hora a la que se **compiló**
+`main.c` (no a la hora del arranque), y lo vuelve a hacer en cada
+reinicio, incluido el que provoca abrir el monitor. Procedimiento:
+
+1. Sacar la microSD y poner `FORZAR_HORA 1` (cambiar el valor obliga a
+   recompilar `main.c` con la hora actual).
+2. `idf.py -p COMx flash`: compila y graba seguido, así que el error es
+   solo lo que tardan el enlazado y la grabación (decenas de segundos).
+3. Sin reiniciar entre medias, poner `FORZAR_HORA 0` y volver a grabar.
+   Desde ahí la hora se conserva en cada reinicio.
+
+El PC que compila debe estar en la zona horaria del país de despliegue.
+La puesta en hora automática (red móvil o GNSS) es la fase 8.
 
 Si la T-SIM7000G no entra en modo de grabación (y la microSD ya está
 fuera): unir IO0 con GND con un cable, pulsar RST, soltarlo, quitar el
@@ -443,6 +504,10 @@ cable y grabar.
   exacto de cada medida: con tres sensores y timeouts de 1 s, la
   desviación puede llegar a 3 s. Irrelevante para el muestreo previsto,
   pero es lo primero a revisar en la fase de sincronización temporal.
+- El RTC no sigue contando cuando se le quita la alimentación de la placa:
+  al volver, continúa desde la hora a la que se quitó (en estudio:
+  pila o configuración del chip). Si el nodo se reinicia en ese estado,
+  vuelve a la hora de compilación.
 - En el montaje sobre protoboard aparece un dispositivo I2C sin explicar en
   0x5F y timeouts intermitentes en direcciones vacías. Pendiente de
   comprobar sobre PCB.
@@ -454,9 +519,10 @@ cable y grabar.
   y en el WROVER-E (T-SIM7600G): en las LilyGo el UART2 del RS-485 va por
   los GPIO19 (TX) y 18 (RX).
 - Transmisión: sin seguridad (HTTP sin clave ni cifrado), el módem se
-  queda encendido entre ciclos, y la página de red de la pantalla aún no
-  muestra operador, señal ni resultado del envío (5.5). El reenvío de lo
-  que falle no está hecho.
-- El módem puede registrarse en GSM en vez de LTE-M, con picos de 2 A.
+  queda encendido entre ciclos y el reenvío de lo que falle no está hecho.
+- El módem se registra en GSM donde no hay LTE-M (todos los sitios
+  probados), con picos de 2 A.
+- Guardar cada línea en la microSD tarda ~2 s en la T-SIM7000G (causa sin
+  identificar).
 - El desfase horario es fijo: el nodo no sirve tal cual en países con
   horario de verano (ver "Desplegar en otro país").
