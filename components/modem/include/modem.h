@@ -49,12 +49,6 @@
 #define MODEM_TIMEOUT_SHREQ_MS 70000  // ms; 60 s de SHCONF "TIMEOUT" más 10 s de margen para que llegue el +SHREQ del módem
 
 
-// Valores del campo <stat> de las respuestas de registro (AT+CREG?/CEREG?/CGREG?).
-#define STAT_SIN_LEER (-1) // Valor propio, no del módem: aún no se ha leído o no se pudo interpretar
-#define STAT_REG_CASA 1    // Registrado en la red de su operador
-#define STAT_DENEGADO 3    // Registro denegado por la red
-#define STAT_REG_ROAMING 5 // Registrado en otra red (roaming)
-
 // Tamaños de los textos de modem_red_t, ajustados a la pantalla
 #define MODEM_TAM_OPERADOR   11   // 10 visibles + '\0' (paso 5.5); se trunca aquí
 #define MODEM_TAM_TECNOLOGIA 7    // "NB-IOT" + '\0'
@@ -96,30 +90,12 @@ modem_estado_t modem_init(void);
 /**
  * @brief Enciende el módem con un pulso de PWRKEY, salvo que ya conteste (PWRKEY conmuta: el mismo pulso apaga).
  *
- * Bloquea unos 6 s si hay que pulsar (pulso 1,1 s + espera 4,6 s + sondeos).
+ * Bloquea unos 6 s si hay que pulsar (pulso 1,1 s + espera 4,6 s + sondeos). Cuando contesta envía ATE0 y
+ * AT+CMEE=1 (NO_SAVE: hay que mandarlos en cada encendido); si fallan, solo avisa en el log.
  *
  * @return MODEM_OK (ya encendido, o contesta tras el pulso) o MODEM_TIMEOUT si no contesta tras el pulso.
  */
 modem_estado_t modem_encender(void);
-
-/**
- * @brief Envía un comando AT al módem desde fuera del componente.
- *
- * Puerta pública de ejecutar() (static): la usan los componentes externos
- * (tarea_transmision). Valida los punteros y delega con log_fallo a true.
- * Vacía el UART antes de enviar: se pierden los avisos que el módem mande por su cuenta.
- *
- * @param cmd        Comando sin terminador (p. ej. "AT+CPIN?").
- * @param resp_out   Buffer donde se guarda la respuesta, siempre terminada en '\0'.
- * @param tam_resp   Tamaño de resp_out en bytes (incluye el '\0').
- * @param timeout_ms Tiempo máximo total de espera, en milisegundos.
- *
- * @return MODEM_OK       Llegó "\r\nOK\r\n".
- * @return MODEM_ERROR    Puntero nulo o tam_resp 0; o lo que devuelve ejecutar(),
- *                        (ERROR/+CME ERROR, respuesta que no cabe, fallo de UART).
- * @return MODEM_TIMEOUT  No llegó ni OK ni error dentro de timeout_ms.
- */
-modem_estado_t modem_comando(const char *cmd, char *resp_out, size_t tam_resp, uint32_t timeout_ms);
 
 /**
  * @brief Apaga el módem con AT+CPOWD=1 y comprueba que deja de contestar.
@@ -161,6 +137,19 @@ modem_estado_t modem_http_post(const char *dominio, const char *ruta, const char
  * @return MODEM_OK o MODEM_TIMEOUT.
  */
 modem_estado_t modem_sondear_at(int intentos); 
+
+/**
+ * @brief Espera a que el módem se registre en la red (AT+CEREG? para LTE y AT+CGREG? para GSM).
+ *
+ * Sondea los dos cada MODEM_SONDEO_REGISTRO_MS hasta que cualquiera dé stat 1 (casa) o 5 (roaming), los dos den
+ * 3 (denegado) o pase timeout_ms. Con timeout_ms = 0 hace una sola lectura. Los comandos del sondeo no se
+ * escriben en el log; sí los cambios de estado y el resultado.
+ *
+ * @param timeout_ms Plazo máximo de espera, en milisegundos.
+ * @return MODEM_OK (registrado), MODEM_TIMEOUT (en la última lectura no contestó ninguno de los dos) o
+ *         MODEM_ERROR (sin red al agotar el plazo, o registro denegado en los dos).
+ */
+modem_estado_t modem_esperar_registro(uint32_t timeout_ms);
 
 /**
  * @brief Pregunta el estado de la SIM (AT+CPIN?).
