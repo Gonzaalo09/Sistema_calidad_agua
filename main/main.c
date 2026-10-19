@@ -8,8 +8,6 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/queue.h"
-#include "driver/uart.h"
 #include "esp_err.h"
 #include "esp_log.h"
 
@@ -27,16 +25,6 @@
 #include "modem.h"
 
 static const char *TAG = "main";
-
-const int uart_buffer_size = 256; // bytes de los buffers RX y TX de la UART2; criterio propio (una respuesta Modbus cabe de sobra)
-QueueHandle_t uart_queue;         // eventos de la UART2; la consume tarea_polling
-
-// Pines de UART2 hacia el modulo RS485-TTL, vistos desde el ESP32.
-// Con TX=18/RX=19 los tres sensores daban timeout (30/09/2026): el cableado real cruza al revés.
-#define RS485_PIN_TX 19 // GPIO de TX; sale del ESP32 hacia el modulo
-#define RS485_PIN_RX 18 // GPIO de RX; entra al ESP32 desde el modulo
-#define RS485_BAUDIOS 9600        // baudios (8N1); tiene que coincidir con todos los sensores del bus (datasheets)
-#define RS485_TAM_COLA_EVENTOS 10 // eventos de la UART pendientes (uart_queue); criterio propio
 
 // 1 = en cada arranque el RTC se pone a la hora de compilación (andamiaje). Desplegar siempre con 0.
 #define FORZAR_HORA 1
@@ -88,18 +76,7 @@ static struct tm hora_compilacion_a_utc(void)
 
 void app_main(void)
 {
-    uart_config_t uart_config = {
-        .baud_rate = RS485_BAUDIOS,
-        .data_bits = UART_DATA_8_BITS,
-        .parity = UART_PARITY_DISABLE,
-        .stop_bits = UART_STOP_BITS_1,
-        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-        .source_clk = UART_SCLK_APB,
-    };
-
-    ESP_ERROR_CHECK(uart_param_config(RS485_UART, &uart_config));
-    ESP_ERROR_CHECK(uart_set_pin(RS485_UART, RS485_PIN_TX, RS485_PIN_RX, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
-    ESP_ERROR_CHECK(uart_driver_install(RS485_UART, uart_buffer_size, uart_buffer_size, RS485_TAM_COLA_EVENTOS, &uart_queue, 0));
+    ESP_ERROR_CHECK(tarea_polling_init());
 
     esp_err_t err_sistema = estado_sistema_init();
     if (err_sistema != ESP_OK)

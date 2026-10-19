@@ -10,6 +10,7 @@
 #include "freertos/queue.h"
 #include "driver/uart.h"
 #include "esp_log.h"
+#include "esp_err.h"
 
 #include "modbus.h"
 #include "sensores.h"
@@ -17,18 +18,63 @@
 #include "tarea_rtc.h"
 #include "estado_sistema.h"
 #include "config_nodo.h"
+#include "registro_csv.h"
 
 #define TIMEOUT_RESPUESTA_MS 1000   // ms hasta que un sensor empieza a contestar; criterio propio
 #define TIMEOUT_LECTURA_UART_MS 100 // ms al leer los bytes ya recibidos; criterio propio
 
-QueueHandle_t cola_lecturas;
+#define RS485_UART UART_NUM_2 // UART del bus Modbus
+
+// Pines de UART2 hacia el modulo RS485-TTL, vistos desde el ESP32.
+// Con TX=18/RX=19 los tres sensores daban timeout (30/09/2026): el cableado real cruza al revés.
+#define RS485_PIN_TX 19 // GPIO de TX; sale del ESP32 hacia el modulo
+#define RS485_PIN_RX 18 // GPIO de RX; entra al ESP32 desde el modulo
+#define RS485_BAUDIOS 9600        // baudios (8N1); tiene que coincidir con todos los sensores del bus (datasheets)
+#define RS485_TAM_COLA_EVENTOS 10 // eventos de la UART pendientes (uart_queue); criterio propio
+#define RS485_TAM_BUFFER 256      // bytes de los buffers RX y TX de la UART2; criterio propio (una respuesta Modbus cabe de sobra)
+
+static QueueHandle_t uart_queue;     // eventos de la UART2
+static QueueHandle_t cola_lecturas;  // ciclos de tarea_polling hacia tarea_transmision
 
 static const char *TAG = "polling";
 
+esp_err_t tarea_polling_init(void)
+{
+    uart_config_t uart_config = {
+        .baud_rate = RS485_BAUDIOS,
+        .data_bits = UART_DATA_8_BITS,
+        .parity = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+        .source_clk = UART_SCLK_APB,
+    };
+
+    esp_err_t err = uart_param_config(RS485_UART, &uart_config);
+    if (err != ESP_OK)
+    {
+        return err;
+    }
+    err = uart_set_pin(RS485_UART, RS485_PIN_TX, RS485_PIN_RX, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    if (err != ESP_OK)
+    {
+        return err;
+    }
+    err = uart_driver_install(RS485_UART, RS485_TAM_BUFFER, RS485_TAM_BUFFER, RS485_TAM_COLA_EVENTOS, &uart_queue, 0);
+    if (err != ESP_OK)
+    {
+        return err;
+    }
+
+    cola_lecturas = xQueueCreate(LONGITUD_COLA_CICLOS, sizeof(ciclo));
+    if (cola_lecturas == NULL)
+    {
+        return ESP_ERR_NO_MEM;
+    }
+    return ESP_OK;
+}
+
 void tarea_polling(void *parametros)
 {
-    cola_lecturas = xQueueCreate(LONGITUD_COLA_CICLOS, sizeof(ciclo));
-
     uint8_t peticion[MODBUS_TAM_PETICION];
     uint8_t datos_rx[256];
     uart_event_t evento;
