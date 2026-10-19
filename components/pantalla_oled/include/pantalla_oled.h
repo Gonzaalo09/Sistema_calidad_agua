@@ -1,6 +1,8 @@
 #ifndef PANTALLA_OLED_H
 #define PANTALLA_OLED_H
 
+#include <stdint.h>
+
 #define PANTALLA_LINEAS 8     // líneas de texto: 64 px / 8 px de la fuente u8g2_font_5x8_tf
 #define PANTALLA_COLUMNAS 25  // caracteres por línea: 128 px / 5 px de la fuente u8g2_font_5x8_tf (25,6 -> 25)
 

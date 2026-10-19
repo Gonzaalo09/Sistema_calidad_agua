@@ -22,9 +22,7 @@
 #define MODEM_ESPERA_UART_MS 4600     // ms; Ton(uart) >= 4,5 s + 100 ms (inicio del sondeo)
 
 // Tiempos de Secuencia de Apagado (HD tabla 9)
-#define MODEM_PULSO_APAGADO_MS 1300      // ms; Toff >= 1,2 s (apagado físico de emergencia)
 #define MODEM_ESPERA_APAGADO_MS 7000     // ms; Toff(uart) máx. 6,9 s (límite para recibir NORMAL POWER DOWN)
-#define MODEM_ESPERA_REENCENDIDO_MS 2000 // ms; Toff-on >= 2 s (reposo obligatorio antes de un nuevo PWRKEY)
 
 // Parámetros lógicos de la Máquina de Estados AT
 #define MODEM_SONDEOS_AT 10           // reintentos de "AT" para asegurar la sincronización de autobaud; criterio propio

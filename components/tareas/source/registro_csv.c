@@ -152,7 +152,7 @@ size_t registro_csv_json(const ciclo *c, char *buf, size_t tam)
            FORMATO_CSV, config_nodo_id(), (unsigned long)c->seq,
            (unsigned long)c->ts, (int)c->estado_rtc);
 
-    for (int i = 0; i < NUM_SENSORES; i++)
+    for (size_t i = 0; i < NUM_SENSORES; i++)
     {
         // TABLA_SENSORES[i] describe el sensor, c->sensor[i] trae sus valores en este ciclo
         const sensor_descrip *d = &TABLA_SENSORES[i];

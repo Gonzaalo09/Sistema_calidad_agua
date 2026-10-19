@@ -2,6 +2,7 @@
 #define MODBUS_H
 
 #include <stdio.h>
+#include <stdint.h>
 
 #define MODBUS_TAM_PETICION 8 // bytes; lectura 0x03: esclavo(1) + funcion(1) + registro(2) + cantidad(2) + CRC(2) (Modbus Application Protocol V1.1b3, 6.3)
 

@@ -11,6 +11,7 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_log.h"
 
 #include "sensores.h"
 #include "estado_sistema.h"
@@ -25,8 +26,6 @@
 #define SEGUNDOS_POR_PAGINA 5   // repintados (= segundos con REFRESCO_MS 1000) antes de cambiar de página; criterio propio
 #define NUM_PAGINAS 2           // página 0: sensores; página 1: red + SD
 #define TAM_TEXTO_ENVIO 18 // 17 caracteres como maximo + '\0': con " !hh:mm" caben las 25 columnas
-
-static const char *TAG = "pantalla";
 
 /**
  * @brief Añade texto al final de una linea sin desbordarla; devuelve la nueva longitud usada (nunca mayor que tam-1).
@@ -402,5 +401,4 @@ void tarea_pantalla(void *parametros)
         }
         vTaskDelay(pdMS_TO_TICKS(REFRESCO_MS));
     }
-    ESP_LOGI(TAG, "pila libre minima: %u B", (unsigned)uxTaskGetStackHighWaterMark(NULL));
 }

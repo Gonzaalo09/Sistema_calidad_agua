@@ -156,6 +156,7 @@ static rtc_estado_t decodificar_hora(const uint8_t bcd[7], struct tm *utc)
     utc->tm_mday = dia;
     utc->tm_mon = mes - 1;      // struct tm: 0 = enero
     utc->tm_year = anio - 1900; // struct tm: años desde 1900
+    utc->tm_isdst = 0;          // sin horario de verano; evita basura si el llamador no inicializó la struct
 
     return RTC_OK;
 }

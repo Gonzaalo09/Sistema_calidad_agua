@@ -58,7 +58,7 @@ void tarea_polling(void *parametros)
             lectura.estado_rtc = ESTADO_OK;
         }
 
-        for (int i = 0; i <= NUM_SENSORES - 1; i++)
+        for (size_t i = 0; i < NUM_SENSORES; i++)
         {
             sensor_descrip entrada = TABLA_SENSORES[i];
             ciclo_sensor *sensor = &lectura.sensor[i];
@@ -93,7 +93,9 @@ void tarea_polling(void *parametros)
 
                     if (longitud > 0)
                     {
-                        longitud = uart_read_bytes(RS485_UART, datos_rx, longitud, pdMS_TO_TICKS(TIMEOUT_LECTURA_UART_MS));
+                        int leidos = uart_read_bytes(RS485_UART, datos_rx, longitud, pdMS_TO_TICKS(TIMEOUT_LECTURA_UART_MS));
+                        // <= 0 (error o nada leído): longitud 0, que no coincide con la esperada y cuenta como trama inválida
+                        longitud = (leidos > 0) ? (size_t)leidos : 0;
                         // Respuesta 0x03: esclavo + función + nº de bytes + datos (2 por registro) + CRC (2)
                         size_t longitud_esperada = 5 + entrada.num_registros * 2;
 

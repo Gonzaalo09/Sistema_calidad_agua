@@ -11,8 +11,7 @@ typedef enum {
      RTC_OK,
      RTC_NO_RESPONDE, // NACK o timeout en el bus, o dispositivo no registrado
      RTC_OSCILADOR_PARADO, // flag OSF = 1, hora no fiable
-     RTC_HORA_INCOHERENTE, // campos fuera de rango, modo 12h inesperado, o la hora releída difiere de la escrita en más de 2 s
-     RTC_OCUPADO // reservado: ninguna función lo devuelve todavía (no hay mutex)
+     RTC_HORA_INCOHERENTE // campos fuera de rango, modo 12h inesperado, o la hora releída difiere de la escrita en más de 2 s
 }rtc_estado_t;
 
 /**
@@ -50,8 +49,5 @@ rtc_estado_t rtc_comprobar_oscilador(void);
  * @return RTC_OK o RTC_NO_RESPONDE.
  */
 rtc_estado_t rtc_leer_temperatura(float *grados_c);
-
-// Declarada pero sin definición en RTC.c: no se puede usar (el enlazado fallaría).
-char rtc_nombre_estado(rtc_estado_t);
 
 #endif
