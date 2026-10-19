@@ -460,6 +460,7 @@ void tarea_transmision(void *parametros)
     static char cabecera[TAM_CABECERA_CSV];
     ciclo lectura;
     modem_red_t red;
+    red_movil_t red_pub;
 
     // TABLA_SENSORES es const: la cabecera se genera una sola vez
     if (registro_csv_cabecera(cabecera, sizeof(cabecera)) == 0)
@@ -479,7 +480,11 @@ void tarea_transmision(void *parametros)
         // Antes de la SD (~2 s): la pantalla no tiene por que esperarla.
         // Si modem_leer_red da TIMEOUT, red queda parcial y se publica igual
         modem_leer_red(&red);
-        estado_sistema_publicar_red(&red, tx, (tx == TX_HTTP_OK), lectura.ts);
+        snprintf(red_pub.operador, sizeof(red_pub.operador), "%s", red.operador);
+        snprintf(red_pub.tecnologia, sizeof(red_pub.tecnologia), "%s", red.tecnologia);
+        red_pub.dbm = red.dbm;
+        snprintf(red_pub.ip, sizeof(red_pub.ip), "%s", red.ip);
+        estado_sistema_publicar_red(&red_pub, tx, (tx == TX_HTTP_OK), lectura.ts);
 
         if (cabecera[0] != '\0')
         {

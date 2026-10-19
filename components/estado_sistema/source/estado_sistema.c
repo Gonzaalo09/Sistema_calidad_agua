@@ -126,7 +126,7 @@ bool estado_sistema_leer(size_t fuente, estado_fuente_t *destino)
     return true;
 }
 
-void estado_sistema_publicar_red(const modem_red_t *red, int tx, bool envio_ok, uint32_t ts)
+void estado_sistema_publicar_red(const red_movil_t *red, int tx, bool envio_ok, uint32_t ts)
 {
     if ((mutex == NULL) || (red == NULL))
     {

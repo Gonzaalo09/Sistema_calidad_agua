@@ -11,7 +11,6 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "esp_log.h"
 
 #include "sensores.h"
 #include "estado_sistema.h"
@@ -20,7 +19,6 @@
 #include "tarea_rtc.h"
 #include "tarea_pantalla.h"
 #include "registro_csv.h"
-#include "modem.h"
 
 #define REFRESCO_MS 1000        // ms entre repintados; el reloj con segundos es el latido del firmware
 #define SEGUNDOS_POR_PAGINA 5   // repintados (= segundos con REFRESCO_MS 1000) antes de cambiar de página; criterio propio
@@ -318,7 +316,7 @@ static void pintar_red(void)
     n = anadir(linea, sizeof(linea), n, "%s %s ",
                (r.red.operador[0] != '\0') ? r.red.operador : "--",
                (r.red.tecnologia[0] != '\0') ? r.red.tecnologia : "--");
-    if (r.red.dbm == MODEM_DBM_DESCONOCIDA)
+    if (r.red.dbm == RED_DBM_DESCONOCIDA)
     {
         n = anadir(linea, sizeof(linea), n, "--");
     }
