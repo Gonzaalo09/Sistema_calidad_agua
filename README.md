@@ -89,12 +89,12 @@ de `main.c` y `tarjeta_sd.c` y reescribir la parte del módem.
 ## Arquitectura
 
 ```
-app_main ── UART2, estado_sistema, config_nodo (NVS), bus I2C, RTC, OLED, SD, módem ── crea las tareas
+app_main ── RS-485 y cola (tarea_polling_init), estado_sistema, config_nodo (NVS), bus I2C, RTC, OLED, SD, módem ── crea las tareas
 
 tarea_polling (5) ──cola_lecturas (1 elemento por ciclo)──> tarea_transmision (3) ──┬── modem ── servidor (HTTP)
       │                                                          │                  └── tarjeta_sd
       ├── RTC (DS3231) ──────┐                                   │ (estado de la red y de la SD)
-      ▼                      ├── I2C_bus                         ▼
+      ▼                      ├── i2c_bus                         ▼
    estado_sistema  <─────────┼───────────────────────────────────┘
       ▲                      │
       └── tarea_pantalla (2) ─┴── pantalla_oled ── u8g2
@@ -117,13 +117,14 @@ más un registro aparte con los datos de la red móvil.
 | `sensores` | `TABLA_SENSORES` y el descriptor de cada sensor |
 | `config_nodo` | ID del nodo (sacado de la MAC del chip) y número de ciclo `seq`, guardado en la memoria interna (NVS) |
 | `tarjeta_sd` | Tarjeta microSD por SPI con sistema de archivos FAT: montar, desmontar, escribir. Nunca formatea |
-| `modem` | SIM7000G por comandos AT sobre UART1: encender, apagar, enviar un comando, comprobar la SIM, abrir la conexión de datos, hacer un POST HTTP (devuelve el código del servidor o en qué paso falló) y leer los datos de la red (operador, tecnología, señal, IP) |
-| `I2C_bus` | Dueño único del bus I2C; cada chip registra su propio dispositivo |
+| `modem` | SIM7000G por comandos AT sobre UART1: encender, apagar, comprobar la SIM, esperar el registro en la red, abrir la conexión de datos, hacer un POST HTTP (devuelve el código del servidor o en qué paso falló) y leer los datos de la red (operador, tecnología, señal, IP). Todo lo que habla AT está aquí |
+| `i2c_bus` | Dueño único del bus I2C; cada chip registra su propio dispositivo |
 | `RTC` | Driver propio del DS3231 en tres capas, siempre en UTC |
 | `pantalla_oled` | Driver del SSD1306 sobre U8g2: callbacks de I2C y esperas, y primitivas de dibujo por líneas |
 | `u8g2` | Librería de terceros (olikraus, BSD), copiada al repo para poder compilar sin internet |
-| `estado_sistema` | Tabla de estado por fuente, con mutex, y registro de la red |
-| `tareas` | `tarea_polling`, `tarea_transmision`, `tarea_rtc` y `tarea_pantalla`, el tipo `ciclo` de la cola, y `registro_csv` (formato de la línea CSV, de la trama JSON y códigos de `tx`) |
+| `estado_sistema` | Tabla de estado por fuente, con mutex, y registro de la red. Usa tipos propios: no depende de ningún driver |
+| `registro_csv` | Formato de la línea CSV y de la trama JSON, códigos de `tx` y el tipo `ciclo` que viaja por la cola. Sin hardware |
+| `tareas` | `tarea_polling` (con `tarea_polling_init`, que prepara el RS-485 y la cola antes de crear las tareas), `tarea_transmision`, `tarea_rtc` y `tarea_pantalla` |
 
 ### Añadir o modificar un sensor
 
@@ -448,14 +449,23 @@ Configuration Editor" de la extensión ESP-IDF). Se navega con las flechas,
 `main.c` (no a la hora del arranque), y lo vuelve a hacer en cada
 reinicio, incluido el que provoca abrir el monitor. Procedimiento:
 
-1. Sacar la microSD y poner `FORZAR_HORA 1` (cambiar el valor obliga a
-   recompilar `main.c` con la hora actual).
+1. Sacar la microSD y poner `FORZAR_HORA 1`. Se escribe la hora de la
+   última compilación de `main.c`, y `main.c` solo se recompila si cambia:
+   si ya estaba a 1, guárdalo o cambia su fecha antes de grabar
+   (PowerShell: `(Get-Item main\main.c).LastWriteTime = Get-Date`). Si no,
+   cada arranque vuelve a escribir una hora antigua y parece que el RTC no
+   cuenta.
 2. `idf.py -p COMx flash`: compila y graba seguido, así que el error es
    solo lo que tardan el enlazado y la grabación (decenas de segundos).
 3. Sin reiniciar entre medias, poner `FORZAR_HORA 0` y volver a grabar.
    Desde ahí la hora se conserva en cada reinicio.
 
 El PC que compila debe estar en la zona horaria del país de despliegue.
+
+Al arrancar, el log muestra la hora del RTC y sus registros de control y
+estado, antes de escribir nada: `0Eh=0x1C (EOSC=0), 0Fh=0x08 (OSF=0)` es lo
+normal. Con OSF = 1 el oscilador se paró (pila agotada o quitada): el nodo
+no escribe nada en el RTC y hay que volver a ponerlo en hora.
 La puesta en hora automática (GNSS o red móvil) está en desarrollo.
 
 Si la T-SIM7000G no entra en modo de grabación (y la microSD ya está
@@ -468,10 +478,6 @@ cable y grabar.
   exacto de cada medida: con tres sensores y timeouts de 1 s, la
   desviación puede llegar a 3 s. Irrelevante para el muestreo previsto,
   pero es lo primero a revisar al implementar la sincronización.
-- El RTC no sigue contando cuando se le quita la alimentación de la placa:
-  al volver, continúa desde la hora a la que se quitó (en estudio:
-  pila o configuración del chip). Si el nodo se reinicia en ese estado,
-  vuelve a la hora de compilación.
 - El electrodo de oxígeno disuelto necesita 4 h de polarización tras
   cualquier corte de alimentación antes de dar medidas fiables.
 - El NPK tarda hasta 10 s en estabilizarse al alimentarlo: la primera
@@ -480,5 +486,8 @@ cable y grabar.
   queda encendido entre ciclos y el reenvío de lo que falle no está hecho.
 - El módem se registra en GSM donde no hay LTE-M (todos los sitios
   probados), con picos de 2 A.
+- Si el módem deja de contestar, el nodo sigue midiendo y guardando en la
+  microSD (`MODEM NO CONTESTA` en pantalla), pero no lo vuelve a encender
+  hasta que se reinicie.
 - El desfase horario es fijo: el nodo no sirve tal cual en países con
   horario de verano (ver "Desplegar en otro país").

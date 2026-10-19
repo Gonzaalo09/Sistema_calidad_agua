@@ -27,8 +27,8 @@
 static const char *TAG = "main";
 
 // 1 = en cada arranque el RTC se pone a la hora de compilación (andamiaje). Desplegar siempre con 0.
-#define FORZAR_HORA 1
-
+#define FORZAR_HORA 0
+ 
 static struct tm hora_compilacion_a_utc(void)
 {
     static const char *meses[] = {
@@ -108,14 +108,50 @@ void app_main(void)
             ESP_LOGW(TAG, "RTC no disponible al arrancar");
             estado_sistema_publicar(FUENTE_RTC, NULL, 0, 0, ESTADO_SIN_RESPUESTA);
         }
+        else
+        {
+            // Diagnóstico de campo: se lee ANTES de cualquier escritura en el RTC (datasheet: 0Eh bit 7 = EOSC, 0Fh bit 7 = OSF)
+            struct tm utc_arranque;
+            char fecha[20];
+            uint8_t control;
+            uint8_t estado;
+
+            if (rtc_leer_hora(&utc_arranque) == RTC_OK)
+            {
+                strftime(fecha, sizeof(fecha), "%Y-%m-%d %H:%M:%S", &utc_arranque);
+            }
+            else
+            {
+                snprintf(fecha, sizeof(fecha), "ilegible");
+            }
+
+            if (rtc_leer_control_estado(&control, &estado) == RTC_OK)
+            {
+                ESP_LOGI(TAG, "RTC al arrancar: %s UTC, 0Eh=0x%02X (EOSC=%d), 0Fh=0x%02X (OSF=%d)",
+                         fecha, control, (control >> 7) & 1, estado, (estado >> 7) & 1);
+            }
+            else
+            {
+                ESP_LOGW(TAG, "RTC al arrancar: %s UTC, registros 0Eh y 0Fh ilegibles", fecha);
+            }
+        }
 
         // OSF=1: el oscilador se paró y la hora no es fiable. Solo se comprueba aquí, al arrancar.
         rtc_estado_t est_osc = rtc_comprobar_oscilador();
-        if (FORZAR_HORA || est_osc == RTC_OSCILADOR_PARADO)
+        if (FORZAR_HORA)
         {
             struct tm utc = hora_compilacion_a_utc();
             ESP_LOGW(TAG, "Fijando hora PROVISIONAL (compilación)");
-            rtc_fijar_hora(&utc);
+            rtc_estado_t est_fijar = rtc_fijar_hora(&utc);
+            if (est_fijar != RTC_OK)
+            {
+                ESP_LOGE(TAG, "rtc_fijar_hora ha fallado (código %d)", est_fijar);
+            }
+            estado_sistema_publicar(FUENTE_RTC, NULL, 0, 0, ESTADO_SIN_HORA);
+        }
+        else if (est_osc == RTC_OSCILADOR_PARADO)
+        {
+            ESP_LOGW(TAG, "OSF=1: hora no fiable, no se escribe");
             estado_sistema_publicar(FUENTE_RTC, NULL, 0, 0, ESTADO_SIN_HORA);
         }
         else if (est_osc == RTC_OK)

@@ -21,7 +21,7 @@ static const uint32_t RTC_VELOCIDAD_HZ = 100000; ///< Hz; el DS3231 admite hasta
 static const int RTC_TIMEOUT_MS = 100;            ///< ms por transacción I2C; criterio propio
 
 static const uint8_t REG_SEGUNDOS = 0x00; ///< Primer registro de hora (segundos); los 7 de hora y fecha son contiguos
-//static const uint8_t REG_CONTROL = 0x0E;  ///< Registro de control
+static const uint8_t REG_CONTROL = 0x0E;  ///< Registro de control: bit 7 = EOSC; el de estado (0Fh) va justo detrás
 static const uint8_t REG_ESTADO = 0x0F;   ///< Registro de estado: contiene OSF
 static const uint8_t REG_TEMP_MSB = 0x11; ///< Byte alto de la temperatura; el bajo es 0x12
 
@@ -391,6 +391,29 @@ rtc_estado_t rtc_comprobar_oscilador(void)
     {
         return RTC_OSCILADOR_PARADO;
     }
+
+    return RTC_OK;
+}
+
+rtc_estado_t rtc_leer_control_estado(uint8_t *control, uint8_t *estado)
+{
+    uint8_t reg[2];
+
+    if ((control == NULL) || (estado == NULL))
+    {
+        return RTC_NO_RESPONDE;
+    }
+
+    // 0Eh y 0Fh son contiguos: una sola transacción
+    esp_err_t err = leer_registros(dev_handle, REG_CONTROL, reg, 2);
+
+    if (err != ESP_OK)
+    {
+        return mapear_error(err);
+    }
+
+    *control = reg[0];
+    *estado = reg[1];
 
     return RTC_OK;
 }

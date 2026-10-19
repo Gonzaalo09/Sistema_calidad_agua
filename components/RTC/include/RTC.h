@@ -44,6 +44,17 @@ rtc_estado_t rtc_fijar_hora(const struct tm *utc);
 rtc_estado_t rtc_comprobar_oscilador(void);
 
 /**
+ * @brief Lee en una sola transacción los registros de control (0Eh) y de estado (0Fh), sin interpretarlos.
+ *
+ * Diagnóstico: el bit 7 de control es EOSC (1 = el oscilador se para al pasar a la pila) y el bit 7 de estado es OSF.
+ *
+ * @param[out] control Registro 0Eh.
+ * @param[out] estado  Registro 0Fh.
+ * @return RTC_OK, o RTC_NO_RESPONDE (bus, dispositivo no registrado o puntero nulo).
+ */
+rtc_estado_t rtc_leer_control_estado(uint8_t *control, uint8_t *estado);
+
+/**
  * @brief Lee la temperatura interna del DS3231 (resolución 0,25 °C).
  * @param[out] grados_c Temperatura en °C.
  * @return RTC_OK o RTC_NO_RESPONDE.
