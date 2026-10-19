@@ -1,3 +1,8 @@
+/*
+ * Tarea consumidora de cola_lecturas: envía cada ciclo por HTTP, lo guarda en la SD con el resultado (tx) y publica el estado.
+ * Fuentes: SIM7000 Series AT Command Manual V1.06; especificación del servidor (documento de diseño del proyecto);
+ * ESP-IDF v6.1, FreeRTOS (colas).
+ */
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -15,12 +20,14 @@
 #include "registro_csv.h"
 #include "modem.h"
 
-#define MAX_ARCHIVOS_DIA 9 // _2 .. _9 si cambian los sensores el mismo dia
-#define TAM_RESP_MODEM 256 // criterio: la respuesta mas larga de 5.1 (AT+CGMR) son decenas de bytes
+#define MAX_ARCHIVOS_DIA 9 // archivos del dia: base, _2 .. _9 si cambian los sensores el mismo dia; criterio propio
+#define TAM_RESP_MODEM 256 // bytes; criterio: la respuesta mas larga de 5.1 (AT+CGMR) son decenas de bytes
 
+// SIM de Claro Perú: valores de selectra.com.pe (terceros, no Claro); confirmados en uso (CNACT? devuelve una IP)
 #define APN_RED "claro.pe"
 #define USUARIO_APN "claro"
 #define CLAVE_APN "claro"
+// Servidor de pruebas del compañero: HTTP sin 's' (decidido: primero solo se comprueba la conexión)
 #define DOMINIO_SERVIDOR "http://yago.alwaysdata.net"
 #define RUTA_MEDIDAS "/servidor_3/api/v1/medidas"
 
@@ -136,13 +143,16 @@ static void imprimir_ciclo(const ciclo *lectura)
 /**
  * @brief Escribe el ciclo en el archivo del dia. Si el archivo del dia ya
  *        existe con otra cabecera (han cambiado los sensores), usa _2, _3...
+ *
+ * Devuelve SD_EST_OK también si la línea CSV no cabe (el ciclo se pierde con un log) y
+ * SD_EST_ERROR_ESCRITURA si ninguno de los MAX_ARCHIVOS_DIA archivos tiene la cabecera actual.
  */
 static sd_estado_t guardar_en_sd(const ciclo *lectura, const char *cabecera, int tx)
 {
     // static: fuera de la pila de la tarea
     static char linea[TAM_LINEA_CSV];
     static char base[TAM_RUTA_CSV];
-    static char ruta[TAM_RUTA_CSV + 16]; // Tiene que caber lo que se añade de base más el peor de los casos(+16) _<número>.csv
+    static char ruta[TAM_RUTA_CSV + 16]; // base + "_<n>.csv" (+16 cubre el peor caso)
     static char primera[TAM_CABECERA_CSV];
 
     if (registro_csv_linea(lectura, tx, linea, sizeof(linea)) == 0)
@@ -358,7 +368,7 @@ static int enviar_ciclo(const ciclo *lectura)
         return TX_TRAMA_NO_CABE;
     }
 
-    // Miras si la sim está lista
+    // Se pregunta en cada ciclo: separa "sin SIM" (revisar SIM) de "sin red" (revisar antena)
     est = modem_sim_lista();
     if (est == MODEM_TIMEOUT)
     {
@@ -446,7 +456,7 @@ static void bringup_modem(void)
 
 void tarea_transmision(void *parametros)
 {
-    // Tamaño del buf que se pasa a anadir()
+    // static: fuera de la pila de la tarea
     static char cabecera[TAM_CABECERA_CSV];
     ciclo lectura;
     modem_red_t red;
@@ -476,7 +486,7 @@ void tarea_transmision(void *parametros)
             sd_estado_t est = guardar_en_sd(&lectura, cabecera, tx);
             publicar_sd(est, lectura.ts);
         }
-        //  Para mirar el tamaño de la pila que queda libre
+        // Andamiaje: pila libre mínima en bytes (ESP-IDF); criterio: subir la pila si baja de 1 KB
         ESP_LOGI(TAG, "pila libre minima: %u B", (unsigned)uxTaskGetStackHighWaterMark(NULL));
     }
 }

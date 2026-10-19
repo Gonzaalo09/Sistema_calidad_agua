@@ -1,3 +1,7 @@
+/*
+ * Tabla de sensores del bus RS-485. Fuentes: datasheets JXCT JXBS-3001-NPK-RS y REMOND (OD, pH RMD-ISHP105),
+ * mapas de registros y reprogramación de dirección.
+ */
 #include <stdio.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
@@ -6,13 +10,12 @@
 
 #include "sensores.h"
 
-// Aquí es donde tienes que meter los nuevos sensores si quieres medir uno nuevo.
-// No hace falta tocar nada más: NUM_SENSORES se calcula solo al final del archivo.
+// Único sitio a tocar para añadir un sensor: NUM_SENSORES se calcula al final del archivo.
 //
-// Antes de añadir un sensor, verifica en SU datasheet:
-//   - la dirección Modbus (slave_id), y si viene de fábrica en 1, reprográmala, de momento, luego quiero poner una función que lo haga solo.
+// Antes de añadir un sensor, verificar en SU datasheet:
+//   - la dirección Modbus (slave_id); si viene de fábrica en 1 hay que reprogramarla a mano (el firmware aún no escribe registros)
 //   - los registros: cuál es el primero y cuántos son contiguos
-//   - el tipo de dato y, si es float, su orden de bytes (ver cabecera de modbus.c)
+//   - el tipo de dato y, si es float, su orden de bytes (ver decodificar_datos en modbus.c)
 const sensor_descrip TABLA_SENSORES[] = {
     // NPK sensor JXBS-3001-NPK-RS
     //{.slave_id = 1, .reg_H = 0x00, .reg_L = 0x1E, .num_registros = 3, .tipo = entero16, .num_valores = 3, .nombres_datos = {"Nitrogeno", "Fosforo", "Potasio"}, .nombre_fuente = "NPK"},

@@ -1,3 +1,7 @@
+/*
+ * Estado del nodo: tabla en RAM por fuente (RTC, pantalla, red, SD, sensores) y registro de red, tras un mutex.
+ * Módulo pasivo: no es una tarea ni toca hardware. Fuente: ESP-IDF v6.1, FreeRTOS (mutex con herencia de prioridad).
+ */
 #include <string.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -13,10 +17,10 @@
 
 static const char *TAG = "estado_sistema";
 
-static estado_fuente_t tabla[NUM_FUENTES];
+static estado_fuente_t tabla[NUM_FUENTES];  // indexada por FUENTE_*
 static registro_red_t registro_red;
-static SemaphoreHandle_t mutex = NULL;
-static const uint32_t MUTEX_TIMEOUT_MS = 100;
+static SemaphoreHandle_t mutex = NULL;      // mutex y no semáforo binario: la herencia de prioridad evita que polling espere tras una tarea media
+static const uint32_t MUTEX_TIMEOUT_MS = 100; // ms; criterio propio
 
 esp_err_t estado_sistema_init(void)
 {
@@ -41,6 +45,7 @@ esp_err_t estado_sistema_init(void)
     tabla[FUENTE_RED].nombre = "Red";
     tabla[FUENTE_SD].nombre = "SD";
 
+    // Puntero, no copia: TABLA_SENSORES es const y global
     for (size_t i = 0; i < NUM_SENSORES; i++)
     {
         tabla[FUENTE_SENSOR_BASE + i].nombre = TABLA_SENSORES[i].nombre_fuente;
@@ -49,10 +54,6 @@ esp_err_t estado_sistema_init(void)
     return ESP_OK;
 }
 
-/**
- * Primero toma el mutex si puede, si puede copia los valores nuevos si hay y meter todos los nuevos valores como de ts y codigo
- * Si pasan NULL y 0 como valores, se mantienen los antiguos
- */
 void estado_sistema_publicar(size_t fuente, const float *valores, uint8_t num_valores, uint32_t ts, estado_codigo_t codigo)
 {
     if (mutex == NULL)
@@ -101,9 +102,6 @@ void estado_sistema_publicar(size_t fuente, const float *valores, uint8_t num_va
     xSemaphoreGive(mutex);
 }
 
-/**
- * Se copian todos los campos de la fuente, incluido el array, quien los lee puede trabajar sin bloquear a nadie
- */
 bool estado_sistema_leer(size_t fuente, estado_fuente_t *destino)
 {
     if ((mutex == NULL) || (destino == NULL))
@@ -248,12 +246,12 @@ void estado_sistema_hora_legible(uint32_t ts, char *buffer, size_t n)
 
     if (ts == 0)
     {
-        snprintf(buffer, n, "--:--"); // Nunca ha funcionado
+        snprintf(buffer, n, "--:--"); // sin hora o nunca hubo un dato bueno
         return;
     }
 
     time_t t = (time_t)ts;
     struct tm local;
-    gmtime_r(&t, &local);
+    gmtime_r(&t, &local); // gmtime_r y no localtime_r: ts ya lleva OFFSET_PAIS_S
     snprintf(buffer, n, "%02d:%02d", local.tm_hour, local.tm_min);
 }

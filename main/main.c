@@ -1,3 +1,7 @@
+/*
+ * Arranque del nodo: inicializa UART2 (RS-485), estado, NVS, I2C, RTC, OLED, SD y módem, y crea las tareas.
+ * Fuentes: ESP-IDF v6.1, "UART"; DS3231 datasheet (Analog Devices), registro de estado 0Fh (OSF).
+ */
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -24,16 +28,17 @@
 
 static const char *TAG = "main";
 
-const int uart_buffer_size = 256;
-QueueHandle_t uart_queue;
+const int uart_buffer_size = 256; // bytes de los buffers RX y TX de la UART2; criterio propio (una respuesta Modbus cabe de sobra)
+QueueHandle_t uart_queue;         // eventos de la UART2; la consume tarea_polling
 
 // Pines de UART2 hacia el modulo RS485-TTL, vistos desde el ESP32.
-#define RS485_PIN_TX 19 // sale del ESP32 hacia el modulo
-#define RS485_PIN_RX 18 // entra al ESP32 desde el modulo
-#define RS485_BAUDIOS 9600        // tiene que coincidir con la de todos los sensores del bus
-#define RS485_TAM_COLA_EVENTOS 10 // eventos de la UART pendientes (uart_queue)
+// Con TX=18/RX=19 los tres sensores daban timeout (30/09/2026): el cableado real cruza al revés.
+#define RS485_PIN_TX 19 // GPIO de TX; sale del ESP32 hacia el modulo
+#define RS485_PIN_RX 18 // GPIO de RX; entra al ESP32 desde el modulo
+#define RS485_BAUDIOS 9600        // baudios (8N1); tiene que coincidir con todos los sensores del bus (datasheets)
+#define RS485_TAM_COLA_EVENTOS 10 // eventos de la UART pendientes (uart_queue); criterio propio
 
-// Poner a 0 tras la primera escritura correcta del RTC.
+// 1 = en cada arranque el RTC se pone a la hora de compilación (andamiaje). Desplegar siempre con 0.
 #define FORZAR_HORA 1
 
 static struct tm hora_compilacion_a_utc(void)
@@ -127,6 +132,7 @@ void app_main(void)
             estado_sistema_publicar(FUENTE_RTC, NULL, 0, 0, ESTADO_SIN_RESPUESTA);
         }
 
+        // OSF=1: el oscilador se paró y la hora no es fiable. Solo se comprueba aquí, al arrancar.
         rtc_estado_t est_osc = rtc_comprobar_oscilador();
         if (FORZAR_HORA || est_osc == RTC_OSCILADOR_PARADO)
         {
@@ -173,6 +179,8 @@ void app_main(void)
         ESP_LOGE(TAG, "Fallo configurando el UART1 o el PWRKEY del modem");
     }
 
+    // Prioridades: el muestreo (5) no debe esperar al módem (3); RTC y pantalla (2) son de apoyo.
+    // Pila libre mínima medida con 6144 B en transmisión: ~3300 B (AC3D04). Criterio: subir si baja de 1 KB.
     xTaskCreate(tarea_polling, "polling", 4096, NULL, 5, NULL);
     xTaskCreate(tarea_transmision, "transmision", 6144, NULL, 3, NULL);
     xTaskCreate(tarea_rtc, "rtc_debug", 4096, NULL, 2, NULL);

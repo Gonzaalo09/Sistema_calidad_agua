@@ -1,13 +1,6 @@
 /*
- * tarea_pantalla.c
- *
- * Pinta en la OLED (128x64, fuente 5x8: 25 columnas x 8 lineas) el reloj
- * con el ID del nodo, los ultimos valores de cada sensor y el estado de
- * cada fuente en lenguaje llano.
- *
- * Los valores de un sensor averiado NO se borran: se muestran con la marca
- * "!hh:mm", que es la hora del ultimo dato bueno, para que nadie los
- * confunda con datos frescos.
+ * Pinta en la OLED (25 columnas x 8 lineas) dos paginas: sensores, y red + SD; el estado de cada fuente sale en lenguaje llano.
+ * Fuentes: u8g2_font_5x8_tf (5x8 px por caracter); textos y acciones de la pagina 2 definidos en el proyecto (paso 5.5).
  */
 
 #include <stdio.h>
@@ -28,24 +21,18 @@
 #include "registro_csv.h"
 #include "modem.h"
 
-#define REFRESCO_MS 1000
-#define SEGUNDOS_POR_PAGINA 5
-#define NUM_PAGINAS 2
+#define REFRESCO_MS 1000        // ms entre repintados; el reloj con segundos es el latido del firmware
+#define SEGUNDOS_POR_PAGINA 5   // repintados (= segundos con REFRESCO_MS 1000) antes de cambiar de página; criterio propio
+#define NUM_PAGINAS 2           // página 0: sensores; página 1: red + SD
 #define TAM_TEXTO_ENVIO 18 // 17 caracteres como maximo + '\0': con " !hh:mm" caben las 25 columnas
 
 static const char *TAG = "pantalla";
 
 /**
- * @brief Añade texto al final de una linea sin desbordarla.
+ * @brief Añade texto al final de una linea sin desbordarla; devuelve la nueva longitud usada (nunca mayor que tam-1).
  *
  * vsnprintf devuelve los caracteres que HABRIA escrito, que puede ser mas
  * de los que caben; por eso se recorta el resultado a tam-1.
- *
- * @param linea Buffer de la linea
- * @param tam   Tamaño total del buffer
- * @param usado Caracteres ya escritos
- * @param formato Cadena de formato, como en printf
- * @return Nueva longitud usada, nunca mayor que tam-1
  */
 static size_t anadir(char *linea, size_t tam, size_t usado, const char *formato, ...)
 {
@@ -99,7 +86,7 @@ static void pintar_reloj(void)
         time_t t = (time_t)ts;
         struct tm local;
 
-        // ts ya lleva sumado OFFSET_PAIS_S, asi que gmtime_r da hora de Peru
+        // ts ya lleva sumado OFFSET_PAIS_S, asi que gmtime_r da la hora del pais
         gmtime_r(&t, &local);
 
         strftime(hora, sizeof(hora), "%d/%m %H:%M:%S", &local);
@@ -111,6 +98,9 @@ static void pintar_reloj(void)
 
 /**
  * @brief Pagina 1: reloj, valores de cada sensor y sus avisos.
+ *
+ * Un sensor averiado conserva sus ultimos valores con la marca "!hh:mm" (hora del ultimo dato bueno),
+ * para que nadie los confunda con datos frescos.
  */
 static void pintar_pagina_datos(void)
 {
@@ -383,9 +373,9 @@ void tarea_pantalla(void *parametros)
 
     while (1)
     {
-        pantalla_oled_limpiar();
-        // Sin pantalla no hay nada que pintar, pero la tarea sigue viva por
+        // Sin pantalla las primitivas no hacen nada, pero la tarea sigue viva por
         // si algun dia se reintenta pantalla_oled_init().
+        pantalla_oled_limpiar();
         switch (pagina)
         {
         case 0:

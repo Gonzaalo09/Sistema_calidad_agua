@@ -1,15 +1,6 @@
 /*
- * config_nodo.c
- *
- * Identidad del nodo y numero de ciclo:
- *   ID:  3 ultimos bytes de la MAC de fabrica del ESP32, en hexadecimal
- *        (p. ej. "A1B2C3"). No se configura: cada chip trae la suya.
- *   seq: numero de ciclo (uint32_t) guardado en la NVS. Nunca se repite;
- *        0 = sin numero. Solo se reinicia borrando la flash (idf.py erase-flash).
- *
- * La NVS no se borra nunca desde el firmware.
- *
- * Fuentes: ESP-IDF v6.1, Non-Volatile Storage Library y Miscellaneous System APIs (MAC).
+ * Identidad del nodo: ID (3 ultimos bytes de la MAC de fabrica, en hexadecimal) y seq (uint32_t en la NVS, nunca se repite; 0 = sin numero).
+ * Fuentes: ESP-IDF v6.1, "Non-Volatile Storage Library" y "Miscellaneous System APIs" (MAC).
  */
 
 #include <stdio.h>
@@ -22,20 +13,17 @@
 
 #include "config_nodo.h"
 
-#define NVS_NAMESPACE "nodo"
-#define CLAVE_SEQ "seq"
+#define NVS_NAMESPACE "nodo" // namespace de la NVS; cambiarlo haria perder el seq guardado
+#define CLAVE_SEQ "seq"      // clave del ultimo seq (uint32_t)
 
 static const char *TAG = "config_nodo";
 
-static nvs_handle_t nvs = 0;
+static nvs_handle_t nvs = 0;         // handle del namespace, abierto en lectura/escritura
 static bool nvs_ok = false;          // false: no se escribe nada, para no arriesgar repetir seq
 static uint32_t seq_actual = 0;      // ultimo seq guardado en la NVS
 static char id_nodo[13] = "SINID";   // 13: cabe la MAC entera en hexadecimal
 
-/**
- * @brief Pone en id_nodo los 3 ultimos bytes de la MAC de fabrica.
- * @return true si se pudo leer la MAC
- */
+/** @brief Pone en id_nodo los 3 ultimos bytes de la MAC de fabrica; false si no se pudo leer. */
 static bool leer_id_de_mac(void)
 {
     uint8_t mac[6];
@@ -56,6 +44,7 @@ cfg_nodo_estado_t config_nodo_init(void)
     bool id_ok = leer_id_de_mac();
     ESP_LOGI(TAG, "ID del nodo: %s", id_nodo);
 
+    // Si falla, no se borra la NVS (los ejemplos de ESP-IDF si lo hacen): borrarla reiniciaria seq y repetiria pares (nodo, seq)
     esp_err_t err = nvs_flash_init();
 
     if (err != ESP_OK)

@@ -1,3 +1,8 @@
+/*
+ * Módem SIM7000G por UART1: encendido/apagado con PWRKEY, comandos AT, registro, datos y HTTP (pila SH*).
+ * Fuentes: SIM7000 Series AT Command Manual V1.06 (manual); SIM7000 Hardware Design V1.07 (HD, tablas 8 y 9);
+ * ESP-IDF v6.1, "UART".
+ */
 #include <string.h>
 #include <stdio.h>
 #include <stdbool.h>
@@ -10,7 +15,7 @@
 
 #include "modem.h"
 
-#define MODEM_TROZO_LECTURA_MS 20 // latencia por lectura; el plazo total sigue siendo timeout_ms
+#define MODEM_TROZO_LECTURA_MS 20 // ms por lectura del UART; el plazo total sigue siendo timeout_ms. Criterio propio (los comandos contestan en <= 20 ms)
 
 // Conversion de AT+CSQ a dBm (manual V1.06, 3.2.16): rssi 2..30 -> -110..-54 dBm
 #define CSQ_RSSI_MIN 2
@@ -22,29 +27,20 @@
 
 static const char *TAG = "modem";
 
-// Comando para apagar el modem
+// Comando para apagar el modem; con "\r" incluido porque se envía sin ejecutar()
 static const char CMD_APAGAR[] = "AT+CPOWD=1\r";
 
 // Buffer de consultar() y modem_sim_lista(). Un solo usuario: tarea_transmision
 static char resp_lectura[MODEM_TAM_RESPUESTA];
 
 /**
- * @brief Envía un comando AT al módem y espera su respuesta final.
+ * @brief Envía un comando AT y espera su respuesta final, leyendo en trozos de MODEM_TROZO_LECTURA_MS.
  *
- * Vacía el UART, envía el comando más "\r" y acumula lo recibido hasta
- * encontrar "OK", un error del módem o agotar el tiempo. El eco del
- * comando queda dentro de la respuesta.
+ * Vacía el UART antes de enviar (se pierden los avisos espontáneos del módem). El eco queda dentro de la respuesta.
+ * `log_fallo` solo silencia el timeout y el desbordamiento del buffer: ERROR y +CME ERROR se registran siempre.
  *
- * @param cmd        Comando sin terminador (p. ej. "AT+CGMR").
- * @param resp_out   Buffer donde se guarda la respuesta, siempre terminada en '\0'.
- * @param tam_resp   Tamaño de resp_out en bytes (incluye el '\0').
- * @param timeout_ms Tiempo máximo total de espera, en milisegundos.
- * @param log_fallo  true: registra error y timeout en el log; false: silencioso.
- *
- * @return MODEM_OK       Llegó "\r\nOK\r\n".
- * @return MODEM_ERROR    Llegó ERROR, +CME ERROR o +CMS ERROR; la respuesta
- *                        no cabe en resp_out; o falló la escritura al UART.
- * @return MODEM_TIMEOUT  No llegó ni OK ni error dentro de timeout_ms.
+ * @return MODEM_OK (llegó "\r\nOK\r\n"), MODEM_ERROR (ERROR, +CME ERROR o +CMS ERROR; no cabe en resp_out;
+ *         fallo del UART) o MODEM_TIMEOUT.
  */
 static modem_estado_t ejecutar(const char *cmd, char *resp_out, size_t tam_resp, uint32_t timeout_ms, bool log_fallo)
 {
@@ -116,9 +112,10 @@ static modem_estado_t ejecutar(const char *cmd, char *resp_out, size_t tam_resp,
     return MODEM_TIMEOUT;
 }
 
+/** @brief Envía un comando más "\r" sin esperar respuesta; vacía el UART ANTES de enviar, no después. */
 static modem_estado_t enviar_linea(const char *cmd)
 {
-    uart_flush_input(UART_NUM_1); // se vacía ANTES de enviar; después ya no
+    uart_flush_input(UART_NUM_1);
     if (uart_write_bytes(UART_NUM_1, cmd, strlen(cmd)) < 0)
     {
         return MODEM_ERROR;
@@ -130,6 +127,12 @@ static modem_estado_t enviar_linea(const char *cmd)
     return MODEM_OK;
 }
 
+/**
+ * @brief Espera una línea que contenga `texto` seguido de "\r\n", sin vaciar el UART.
+ *
+ * Para respuestas que llegan tarde (p. ej. +SHREQ): lo que ya hubiera en el UART cuenta.
+ * Devuelve MODEM_ERROR si llega ERROR o +CME ERROR, y MODEM_TIMEOUT si no llega en timeout_ms.
+ */
 static modem_estado_t esperar_linea(const char *texto, char *resp, size_t tam, uint32_t timeout_ms)
 {
     size_t n = 0;
@@ -178,18 +181,9 @@ static modem_estado_t esperar_linea(const char *texto, char *resp, size_t tam, u
 }
 
 /**
- * @brief Comprueba si la conexión de datos está activa (AT+CNACT?, manual V1.06, 5.2.30).
+ * @brief true si la conexión de datos está activa (AT+CNACT?, manual 5.2.30).
  *
- * Uso interno de `modem_abrir_datos`: al principio, para saltarse la activación si el
- * módem ya la tiene de un ciclo anterior, y en el bucle de espera tras AT+CNACT=1,
- * preguntando cada MODEM_SONDEO_CNACT_MS hasta que pase a activa.
- *
- * @param resp     Buffer de trabajo donde se guarda la respuesta del módem (lo pisa).
- * @param tam_resp Tamaño de resp en bytes (incluye el '\0').
- *
- * @return true   La respuesta trae "+CNACT: <status>" con status = CNACT_ACTIVA.
- * @return false  Status distinto, respuesta sin "+CNACT:" o el comando falló
- *                (ERROR o timeout); no distingue entre estas causas.
+ * `resp` es buffer de trabajo (se pisa). Da false tanto con status distinto como si el comando falla: no distingue.
  */
 static bool app_network_activa(char *resp, size_t tam_resp)
 {
@@ -200,9 +194,8 @@ static bool app_network_activa(char *resp, size_t tam_resp)
     {
         return false;
     }
-    // Localiza el inicio de la línea de interes
+    // Respuesta esperada: +CNACT: 1,"10.20.30.40"; se lee el <status> justo tras el prefijo
     p = strstr(resp, "+CNACT:");
-    // la suma p + ... slata ese texto y apunta justo detrás, respuesta supuesta: CNACT: 1,"10.20.30.40"
     if (p == NULL || sscanf(p + strlen("+CNACT:"), "%d", &estado) != 1)
     {
         return false;
@@ -300,7 +293,6 @@ modem_estado_t modem_init(void)
         .source_clk = UART_SCLK_DEFAULT,
     };
 
-    // Configura el pin GPIO4 como salida para el PWRKEY del modem
     gpio_config_t io = {
         .pin_bit_mask = 1ULL << MODEM_PIN_PWRKEY,
         .mode = GPIO_MODE_OUTPUT,
@@ -329,7 +321,7 @@ modem_estado_t modem_init(void)
         return MODEM_ERROR;
     }
 
-    // Se pone a low para que no mande lo que tenga puesto de un princpio
+    // Nivel bajo antes de configurar la salida, para no dar un pulso espurio en PWRKEY (Q4 invierte: alto = pulsado)
     gpio_set_level(MODEM_PIN_PWRKEY, 0);
     err = gpio_config(&io);
     if (err != ESP_OK)
@@ -371,7 +363,6 @@ modem_estado_t modem_encender(void)
     return MODEM_TIMEOUT;
 }
 
-// Documentación en modem.h
 modem_estado_t modem_comando(const char *cmd, char *resp_out, size_t tam_resp, uint32_t timeout_ms)
 {
     if (cmd == NULL || resp_out == NULL || tam_resp == 0)
@@ -381,9 +372,6 @@ modem_estado_t modem_comando(const char *cmd, char *resp_out, size_t tam_resp, u
     return ejecutar(cmd, resp_out, tam_resp, timeout_ms, true);
 }
 
-/**
- * Miras si la red está lista para recibir datos
- */
 modem_estado_t modem_abrir_datos(const char *apn, const char *usuario, const char *clave)
 {
     static char resp[MODEM_TAM_RESPUESTA];
@@ -402,8 +390,8 @@ modem_estado_t modem_abrir_datos(const char *apn, const char *usuario, const cha
         return MODEM_OK;
     }
 
-    // APN, usuario, clave y PAP en un solo comando (manual V1.06, 5.2.31)
-    // Miras si el buffer se pasa de tamaño
+    // APN, usuario, clave y PAP en un solo comando (manual 5.2.31).
+    // Si el comando no cabe en cmd se aborta: truncado configuraría un APN o una clave erróneos.
     if (snprintf(cmd, sizeof(cmd), "AT+CNCFG=1,\"%s\",\"%s\",\"%s\",1", apn, usuario, clave) >= (int)sizeof(cmd))
     {
         return MODEM_ERROR;
@@ -467,8 +455,7 @@ modem_estado_t modem_http_post(const char *dominio, const char *ruta, const char
     // módem encendido). Silencioso: lo normal es que devuelva ERROR
     ejecutar("AT+SHDISC", resp, sizeof(resp), MODEM_TIMEOUT_COMANDO_MS, false);
 
-    // Configurar (9.2.2): antes de conectar. Solo guarda ajustes en el módem
-    // Guarda la URL del servidor. Aún no conecta
+    // Configurar (9.2.2): antes de conectar. Solo guarda ajustes en el módem; la URL es el dominio, la ruta va en SHREQ.
     if (snprintf(cmd, sizeof(cmd), "AT+SHCONF=\"URL\",\"%s\"", dominio) >= (int)sizeof(cmd))
     {
         return MODEM_ERROR;
@@ -477,13 +464,13 @@ modem_estado_t modem_http_post(const char *dominio, const char *ruta, const char
     est = ejecutar(cmd, resp, sizeof(resp), MODEM_TIMEOUT_COMANDO_MS, true);
     if (est == MODEM_OK)
     {
-        // Fija el tamaño máximo del cuerpo (1024 B). Solo configura
+        // Tamaño máximo del cuerpo: 1024 B según el manual V1.06 (la nota de versión dice 4096, sin verificar)
         est = ejecutar("AT+SHCONF=\"BODYLEN\",1024", resp, sizeof(resp), MODEM_TIMEOUT_COMANDO_MS, true);
     }
 
     if (est == MODEM_OK)
     {
-        // Fija el tamaño máximo de las cabeceras (350 B). Solo configura
+        // Tamaño máximo de las cabeceras: 350 B
         est = ejecutar("AT+SHCONF=\"HEADERLEN\",350", resp, sizeof(resp), MODEM_TIMEOUT_COMANDO_MS, true);
     }
 
@@ -498,13 +485,13 @@ modem_estado_t modem_http_post(const char *dominio, const char *ruta, const char
     if (est == MODEM_OK)
     {
         *paso_out = MODEM_PASO_PETICION;
-        // Guarda la cabecera Content-Type en el módem. Aún no se envía
+        // Guarda la cabecera Content-Type en el módem; se envía con SHREQ
         est =ejecutar("AT+SHAHEAD=\"Content-Type\",\"application/json\"", resp, sizeof(resp),
                        MODEM_TIMEOUT_COMANDO_MS, true);
     }
     if (est == MODEM_OK)
     {
-        // Avisa al módem: "te mando <len> bytes de cuerpo". Aún no es el cuerpo
+        // Avisa al módem de los <len> bytes de cuerpo que vienen (9.2.5)
         if (snprintf(cmd, sizeof(cmd), "AT+SHBODEXT=%u,%u", (unsigned)len, (unsigned)MODEM_SHBODEXT_MS) >= (int)sizeof(cmd))
         {
             est = MODEM_ERROR;
@@ -519,7 +506,7 @@ modem_estado_t modem_http_post(const char *dominio, const char *ruta, const char
         // El manual no dice si sale un aviso (">") antes del texto. Con la pausa
         // da igual: si sale, queda en resp y no estorba
         vTaskDelay(pdMS_TO_TICKS(MODEM_PAUSA_CUERPO_MS));
-        // Manda el JSON por la UART. El módem lo guarda, aún no se envía
+        // El cuerpo va crudo por la UART; el módem lo guarda y no lo envía hasta SHREQ
         if (uart_write_bytes(UART_NUM_1, cuerpo, len) < 0)
         {
             est = MODEM_ERROR;
@@ -538,8 +525,7 @@ modem_estado_t modem_http_post(const char *dominio, const char *ruta, const char
     {
         // Antes de lanzar SHREQ: un ERROR de SHREQ llega en la espera de +SHREQ:, no aquí
         *paso_out = MODEM_PASO_RESPUESTA;
-        // Lanza el POST: ahora el módem envía cabecera y cuerpo al servidor
-        // 3 = POST. Una ruta truncada mandaria el POST a otra URL
+        // 3 = POST. Si la ruta no cabe se aborta: truncada mandaria el POST a otra URL
         if (snprintf(cmd, sizeof(cmd), "AT+SHREQ=\"%s\",3", ruta) >= (int)sizeof(cmd))
         {
             est = MODEM_ERROR;
@@ -572,7 +558,6 @@ modem_estado_t modem_http_post(const char *dominio, const char *ruta, const char
     return est;
 }
 
-// Mira si la SIM está lista 
 modem_estado_t modem_sim_lista(void)
 {
     modem_estado_t est;
@@ -584,7 +569,7 @@ modem_estado_t modem_sim_lista(void)
         return est;
     }
 
-    // SIM PIN, SIM PUK...: contesta OK pero la SIM no sirve, devuelve NULL si no encuentra string2
+    // SIM PIN, SIM PUK...: el módem contesta OK pero la SIM no sirve, así que no basta el OK
     if (strstr(resp_lectura, "+CPIN: READY") == NULL)
     {
         return MODEM_ERROR;
@@ -627,13 +612,12 @@ modem_estado_t modem_leer_red(modem_red_t *red)
     }
     if (est == MODEM_OK)
     {
-        // Consultar deja justo despés de lso dos puntos( * ), se los salta hasta que apunta a la respuesta
+        // consultar() deja d justo tras los dos puntos: se saltan los espacios hasta la tecnología
         while (*d == ' ')
         {
             d++;
         }
 
-        // Devuelve si son iguales o no 
         if (strncmp(d, "GSM", 3) == 0)
         {
             snprintf(red->tecnologia, sizeof(red->tecnologia), "GSM");
@@ -655,7 +639,7 @@ modem_estado_t modem_leer_red(modem_red_t *red)
     {
         return MODEM_TIMEOUT;
     }
-    // sscanf lee los valores que hay en d que es la respuesta a AT+CSQ, y te da los valores de la respuesta
+    // Se leen <rssi>,<ber> de la respuesta; solo rssi se usa
     if ((est == MODEM_OK) && (sscanf(d, "%d,%d", &rssi, &ber) == 2))
     {
         if (rssi == 0)
@@ -735,7 +719,6 @@ modem_estado_t modem_apagar(void)
         {
             n += (size_t)leidos;
             resp[n] = '\0';
-            // Compara lo recibido con la cadena esperada, si es distinto de NULL pone true en visto
             visto = (strstr(resp, "NORMAL POWER DOWN") != NULL);
         }
     }
@@ -750,7 +733,7 @@ modem_estado_t modem_apagar(void)
         ESP_LOGW(TAG, "sin NORMAL POWER DOWN, recibido: %s", resp);
     }
 
-    // Toff(uart) llega a 6,9 s (HD tabla 9): se espera solo lo que falte. Tarda el modem en apagarse según la tabla MODEM_ESPEA_APAGADO_MS
+    // Toff(uart) llega a 6,9 s (HD tabla 9): se espera solo lo que falte hasta MODEM_ESPERA_APAGADO_MS
     transcurrido = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS) - t0;
     if (transcurrido < MODEM_ESPERA_APAGADO_MS)
     {

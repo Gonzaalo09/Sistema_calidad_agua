@@ -1,3 +1,8 @@
+/*
+ * Tarea de sondeo: lee cada sensor de TABLA_SENSORES por Modbus RTU y encola un ciclo por vuelta.
+ * Fuentes: Modbus Application Protocol V1.1b3, 6.3; Modbus over Serial Line V1.02, 2.5.1.1 (silencio entre tramas);
+ * ESP-IDF v6.1, "UART".
+ */
 #include <string.h>
 
 #include "freertos/FreeRTOS.h"
@@ -13,8 +18,8 @@
 #include "estado_sistema.h"
 #include "config_nodo.h"
 
-#define TIMEOUT_RESPUESTA_MS 1000   // espera maxima a que un sensor empiece a contestar
-#define TIMEOUT_LECTURA_UART_MS 100 // espera maxima al leer los bytes ya recibidos
+#define TIMEOUT_RESPUESTA_MS 1000   // ms hasta que un sensor empieza a contestar; criterio propio
+#define TIMEOUT_LECTURA_UART_MS 100 // ms al leer los bytes ya recibidos; criterio propio
 
 QueueHandle_t cola_lecturas;
 
@@ -33,11 +38,12 @@ void tarea_polling(void *parametros)
 
     while (1)
     {
-        memset(&lectura, 0, sizeof(lectura)); // Se pone al inicio todo el ciclo a 0
+        memset(&lectura, 0, sizeof(lectura)); // todos los códigos quedan en SIN_DATOS (= 0)
 
-        lectura.seq = config_nodo_siguiente_seq(); // Configuramos el numero de seq al siguiente
+        lectura.seq = config_nodo_siguiente_seq();
 
-        // Se toma el valor del RTC al principio del ciclo, todos los sensores vana atener esta hora aunque hay adiferencias de tiempo entre sus tomas serán de segundos
+        // Una sola lectura del RTC por ciclo: todos los sensores comparten el ts del inicio del ciclo
+        // (una medida puede salir sellada hasta unos segundos antes de tomarse).
         uint32_t ts = rtc_timestamp_pais();
         if (ts == 0)
         {
@@ -77,7 +83,7 @@ void tarea_polling(void *parametros)
 
             bool trama_ok = false;
 
-            // Llega algo
+            // Espera el primer evento de la UART; sin evento en el plazo = el sensor no contesta
             if (xQueueReceive(uart_queue, (void *)&evento, pdMS_TO_TICKS(TIMEOUT_RESPUESTA_MS)))
             {
                 if (evento.type == UART_DATA)
@@ -88,11 +94,12 @@ void tarea_polling(void *parametros)
                     if (longitud > 0)
                     {
                         longitud = uart_read_bytes(RS485_UART, datos_rx, longitud, pdMS_TO_TICKS(TIMEOUT_LECTURA_UART_MS));
-                        // Depende del número de registros (2bytes por cada registro)
+                        // Respuesta 0x03: esclavo + función + nº de bytes + datos (2 por registro) + CRC (2)
                         size_t longitud_esperada = 5 + entrada.num_registros * 2;
 
                         if (longitud == longitud_esperada)
                         {
+                            // En RTU el CRC viaja con el byte bajo primero
                             uint16_t crc_recibido = (datos_rx[longitud - 1] << 8) | datos_rx[longitud - 2];
                             uint16_t crc_calculado = calcular_crc16(datos_rx, longitud - 2);
 
@@ -117,7 +124,7 @@ void tarea_polling(void *parametros)
 
                     estado_sistema_publicar(FUENTE_SENSOR_BASE + i, sensor->valores, sensor->num_valores, ts, ESTADO_OK);
                 }
-                else // Trama corrupta llega pero hay algo mal
+                else // llegó algo pero no es válido: longitud o CRC erróneos, o un evento de UART que no es de datos
                 {
                     sensor->codigo = ESTADO_TRAMA_INVALIDA;
                     ESP_LOGW(TAG, "%s: trama invalida (longitud o CRC)", entrada.nombre_fuente);
@@ -128,10 +135,11 @@ void tarea_polling(void *parametros)
             {
                 sensor->codigo = ESTADO_SIN_RESPUESTA;
                 ESP_LOGW(TAG, "%s: sin respuesta en sensor", entrada.nombre_fuente);
-                // Hay un Timeout y no llega nada y la uart no recibe nada
+                // Timeout: cable o alimentación
                 estado_sistema_publicar(FUENTE_SENSOR_BASE + i, NULL, 0, 0, ESTADO_SIN_RESPUESTA);
             }
-            // Aunque la trama vaya mal tiene que haber un tiempo entre medidas para que se sepa cuando es el final
+            // Silencio entre tramas: t3.5 = 3,5 caracteres de 11 bits a 9600 baudios ≈ 4 ms; 5 ms lo cubre
+            // (Modbus over Serial Line V1.02, 2.5.1.1). Se aplica también tras un fallo.
             vTaskDelay(pdMS_TO_TICKS(5));
         }
         lectura.num_sensores = NUM_SENSORES;
@@ -141,6 +149,7 @@ void tarea_polling(void *parametros)
             ESP_LOGE(TAG, "cola llena: ciclo perdido");
         }
 
+        // El periodo se cuenta desde el arranque de la tarea, no desde una rejilla UTC
         vTaskDelayUntil(&proximo_ciclo, pdMS_TO_TICKS(PERIODO_MUESTREO_MS));
         ESP_LOGI(TAG, "pila libre minima: %u B", (unsigned)uxTaskGetStackHighWaterMark(NULL));
     }

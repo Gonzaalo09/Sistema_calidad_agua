@@ -3,8 +3,7 @@
 
 #include <stdio.h>
 
-// Peticion de lectura 0x03: esclavo(1) + funcion(1) + registro(2) + cantidad(2) + CRC(2)
-#define MODBUS_TAM_PETICION 8
+#define MODBUS_TAM_PETICION 8 // bytes; lectura 0x03: esclavo(1) + funcion(1) + registro(2) + cantidad(2) + CRC(2) (Modbus Application Protocol V1.1b3, 6.3)
 
 /**
  * @brief Formato en el que un sensor codifica sus registros Modbus.
@@ -15,7 +14,7 @@ typedef enum TipoDato {
 } TipoDato;
 
 /**
- * @brief Calcula el CRC16 Modbus (RTU) de un buffer de bytes.
+ * @brief Calcula el CRC16 Modbus (RTU) de un buffer.
  *
  * @param buffer   Puntero al primer byte sobre el que calcular el CRC.
  * @param longitud Número de bytes a incluir en el cálculo. NO debe incluir
@@ -27,8 +26,7 @@ typedef enum TipoDato {
 uint16_t calcular_crc16(uint8_t *buffer, uint16_t longitud);
 
 /**
- * @brief Construye una trama de petición Modbus RTU (función 0x03, "leer
- *        holding registers") y le añade su CRC16 al final.
+ * @brief Construye una petición Modbus RTU de lectura (0x03) con su CRC16.
  *
  * @param[out] peticion_out  Buffer ya reservado por quien llama, de al
  *                           menos MODBUS_TAM_PETICION bytes, donde se escribe la trama
@@ -41,8 +39,9 @@ uint16_t calcular_crc16(uint8_t *buffer, uint16_t longitud);
 void construir_peticion(uint8_t* peticion_out, uint8_t id_esclavo, uint8_t addres_H, uint8_t addres_L, uint16_t num_registros);
 
 /**
- * @brief Decodifica los valores de datos de una respuesta Modbus ya
- *        validada (longitud y CRC correctos) a un array de floats.
+ * @brief Decodifica los datos de una respuesta ya validada (longitud y CRC) a floats.
+ *
+ * Un tipo desconocido deja `valores_out` sin escribir. No devuelve nada.
  *
  * @param datos        Trama de respuesta completa recibida. Se asume que
  *                     el campo de datos empieza en el byte 3 (slave_id

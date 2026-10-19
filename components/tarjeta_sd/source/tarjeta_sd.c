@@ -1,14 +1,7 @@
 /*
- * tarjeta_sd.c
- *
- * Tarjeta microSD por SPI con sistema de archivos FAT (FatFs + VFS de ESP-IDF).
- * El bus SPI se inicializa una vez en app_main. Montar, desmontar y escribir
- * se hace despues desde la unica tarea que usa la SD (tarea_transmision).
- * El nodo nunca formatea la tarjeta. Las rutas que recibe son relativas a la
- * tarjeta; el punto de montaje es privado de este archivo.
- *
- * Fuentes: ESP-IDF v6.1, FAT Filesystem Support, SD SPI Host Driver,
- * SD/SDIO/MMC Driver y SD Pull-up Requirements.
+ * MicroSD por SPI con FAT (FatFs + VFS de ESP-IDF); nunca formatea. Las rutas son relativas a la tarjeta.
+ * Fuentes: ESP-IDF v6.1, "FAT Filesystem Support", "SD SPI Host Driver", "SD/SDIO/MMC Driver" y "SD Pull-up Requirements";
+ * esquemático T-SIM7000G V1.6 (pines del slot).
  */
 
 #include <stdio.h>
@@ -25,28 +18,28 @@
 
 #include "tarjeta_sd.h"
 
-// Unico sitio con el hardware de la SD: al migrar al LilyGo se cambia aqui
-#define SD_SPI_HOST SPI3_HOST // VSPI
-#define SD_PIN_MOSI 15        // 23 esp de ejemplo, 15 en 7000G
-#define SD_PIN_MISO 2         // 19 esp de ejemplo, 2 en 7000G
-#define SD_PIN_SCK 14         // 18 esp de ejemplo, 14 en 7000G
-#define SD_PIN_CS 13          // 5 esp ejemplo, 13 en 7000G 
-#define SD_FREQ_KHZ 5000 // 40 MHz / 8: de sobra para una linea por ciclo
+// Unico sitio con el hardware de la SD (T-SIM7000G, esquemático V1.6). Los pines no son los IO_MUX de ningún host SPI: van por la matriz GPIO.
+#define SD_SPI_HOST SPI3_HOST // VSPI; no SPI2, cuyos pines nativos incluyen GPIO12 (strapping)
+#define SD_PIN_MOSI 15        // GPIO de MOSI/CMD; en el DevKit era 23
+#define SD_PIN_MISO 2         // GPIO de MISO/DAT0 (strapping: sacar la SD para grabar); en el DevKit era 19
+#define SD_PIN_SCK 14         // GPIO de SCK; en el DevKit era 18
+#define SD_PIN_CS 13          // GPIO de CS/DAT3; en el DevKit era 5
+#define SD_FREQ_KHZ 5000      // kHz; 40 MHz / 8 (solo fracciones enteras de 40 MHz), de sobra para una linea por ciclo
 
-#define PUNTO_MONTAJE "/sdcard"
-#define TAM_RUTA_COMPLETA 96
-#define SD_MIN_LIBRE_BYTES (1024ULL * 1024ULL) // por debajo se considera llena
+#define PUNTO_MONTAJE "/sdcard"   // punto de montaje del VFS; privado de este archivo
+#define TAM_RUTA_COMPLETA 96      // bytes; PUNTO_MONTAJE + '/' + ruta de registro_csv (TAM_RUTA_CSV 48) con margen; criterio propio
+#define SD_MIN_LIBRE_BYTES (1024ULL * 1024ULL) // por debajo se considera llena; criterio propio (margen para entradas de directorio)
 
 static const char *TAG = "tarjeta_sd";
 
 static sdmmc_card_t *card = NULL;
-static bool bus_ok = false;
+static bool bus_ok = false;   // el bus SPI se inicializó (tarjeta_sd_init)
 static bool montada = false;
 
 /**
  * @brief Traduce el errno de un fallo de archivo a sd_estado_t.
- *        Si la tarjeta no esta o fallo al escribir, desmonta para reintentar el
- *        montaje en el ciclo siguiente.
+ *
+ * Salvo ENOSPC, desmonta para reintentar el montaje en el ciclo siguiente.
  */
 static sd_estado_t fallo_errno(const char *donde)
 {
@@ -69,9 +62,7 @@ static sd_estado_t fallo_errno(const char *donde)
     return SD_EST_ERROR_ESCRITURA;
 }
 
-/**
- * @brief Monta la tarjeta si no lo esta.
- */
+/** @brief Monta la tarjeta si no lo esta. */
 static sd_estado_t asegurar_montada(void)
 {
     if (montada == true)
@@ -82,10 +73,7 @@ static sd_estado_t asegurar_montada(void)
     return tarjeta_sd_montar();
 }
 
-/**
- * @brief Crea la carpeta que contiene a 'completa' si no existe.
- *        Un archivo en la raiz no necesita carpeta.
- */
+/** @brief Crea la carpeta que contiene a 'completa' si no existe; un archivo en la raiz no necesita carpeta. */
 static bool crear_carpeta_padre(const char *completa)
 {
     char carpeta[TAM_RUTA_COMPLETA];
@@ -129,7 +117,7 @@ sd_estado_t tarjeta_sd_init(void)
         .sclk_io_num = SD_PIN_SCK,
         .quadwp_io_num = -1, // los nativos de SPI3 (22 y 21) son el bus I2C
         .quadhd_io_num = -1,
-        .max_transfer_sz = 4000,
+        .max_transfer_sz = 4000, // bytes; criterio propio (se escribe una línea por ciclo)
     };
 
     esp_err_t err = spi_bus_initialize(SD_SPI_HOST, &bus_cfg, SDSPI_DEFAULT_DMA);
@@ -167,7 +155,7 @@ sd_estado_t tarjeta_sd_montar(void)
 
     esp_vfs_fat_mount_config_t mount_config = {
         .format_if_mount_failed = false,  // el nodo nunca formatea
-        .max_files = 2,
+        .max_files = 2, // archivos abiertos a la vez; criterio propio (solo se abre uno)
         .disk_status_check_enable = true, // detecta tarjetas sacadas sin desmontar
     };
 
@@ -290,14 +278,7 @@ sd_estado_t tarjeta_sd_primera_linea(const char *ruta, char *buf, size_t tam, bo
 
     *existe = true;
 
-    // Escritura: abrir en modo añadir, escribir y cerrar (fclose vuelca a la tarjeta)
-    // a cadena es el modo y lo que vas a hacer con el archivo: 
-    // "r" : lectura si escritura no: Si lo puede abrir lo lee desde el principio
-    // "w" : lectura no escritura si: Si no existe lo crea, si ya existe lo vacía
-    // "a" : lectura no escritura si, siempre al final: Si no existe lo crea, si existe lo conserva y añade detras
-    // "r+" : lectura si escritura si: si no existe falla, si existe escribe encima sin vaciar
-    // "w+" : lectura si escritura si: si no existe lo crea, si existe lo vacía
-    // "a+" : lectura si, esctirua si, siempre al final: si no existe lo crea, si existe, lee desde donde quieras y escribe al final
+    // Modo "r": solo lectura, desde el principio del archivo
     FILE *f = fopen(completa, "r");
 
     if (f == NULL)
@@ -346,6 +327,7 @@ sd_estado_t tarjeta_sd_escribir_linea(const char *ruta, const char *cabecera, co
     struct stat st;
     bool nuevo = (stat(completa, &st) != 0);
 
+    // Modo "a": crea el archivo si no existe y escribe siempre al final
     FILE *f = fopen(completa, "a");
 
     if (f == NULL)
