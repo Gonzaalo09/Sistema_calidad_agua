@@ -5,7 +5,7 @@
 #include "driver/i2c_master.h"
 #include "esp_log.h"
 
-#include "I2C_bus.h"
+#include "i2c_bus.h"
 
 #define I2C_SDA_IO  GPIO_NUM_21 // SDA; mismo GPIO en el DevKit y en la T-SIM7000G (esquemático V1.6)
 #define I2C_SCL_IO  GPIO_NUM_22 // SCL; mismo GPIO en el DevKit y en la T-SIM7000G (esquemático V1.6)

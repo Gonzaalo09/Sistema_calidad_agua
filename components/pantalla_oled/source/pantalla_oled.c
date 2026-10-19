@@ -18,7 +18,7 @@
 
 #include "u8g2.h"
 
-#include "I2C_bus.h"
+#include "i2c_bus.h"
 #include "pantalla_oled.h"
 
 #define OLED_BUF_TX 132 ///< Una transacción de u8g2 no pasa de ~33 bytes (0x00 + comando + argumentos, o 0x40 + 24 datos)

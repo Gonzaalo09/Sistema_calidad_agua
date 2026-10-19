@@ -7,7 +7,6 @@
 #include "tarea_polling.h"
 
 #define FORMATO_CSV 1      // subir si cambia el orden o el significado de las columnas fijas
-#define TX_NO_INTENTADO 0  // no se llegó a intentar el envío (definido otra vez más abajo, con el mismo valor)
 
 #define TAM_CABECERA_CSV 512 // bytes; criterio propio (141 B con NPK, OD y pH; con 8 sensores de 8 valores no cabría)
 #define TAM_LINEA_CSV 512 // bytes; línea que se escribe en la SD; criterio propio (375 B en el peor caso con NPK, OD y pH)

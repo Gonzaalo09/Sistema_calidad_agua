@@ -12,7 +12,7 @@
 #include "esp_log.h"
 
 #include "RTC.h"
-#include "I2C_bus.h"
+#include "i2c_bus.h"
 
 static const char *TAG = "RTC";
 
