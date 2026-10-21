@@ -31,4 +31,12 @@ const char *config_nodo_id(void);
  */
 uint32_t config_nodo_siguiente_seq(void);
 
+uint32_t config_nodo_t_sync(void); // Devuelve la úlima sincronización correcta (GNSS o NTP)
+
+uint32_t config_nodo_t_gnss(void); // Devuelve el último intento de GNSS con o sin fix
+
+void config_nodo_guardar_t_sync(uint32_t t); // Actualiza la copia de t_sync en la RAM y la guarda en la NVS 
+
+void config_nodo_guardar_t_gnss(uint32_t t); // Actualiza la copia de t_gnss en la RAM y la guarda en la NVS
+
 #endif

@@ -7,24 +7,6 @@
 #include "sensores.h"
 #include "estado_sistema.h"
 
-/** @brief Resultado de un sensor en un ciclo. */
-typedef struct ciclo_sensor
-{
-    estado_codigo_t codigo;       // OK o el código de fallo de ese sensor
-    uint8_t num_valores;          // posiciones válidas de valores[]; 0 si el sensor falló
-    float valores[MAX_VALORES];   // magnitudes, en el orden de nombres_datos de TABLA_SENSORES
-} ciclo_sensor;
-
-/** @brief Una vuelta de tarea_polling: hora, número de ciclo y todos los sensores. Es el elemento de cola_lecturas. */
-typedef struct ciclo
-{
-    uint32_t ts;                // segundos, UTC + OFFSET_PAIS_S; 0 si el RTC falló. Marca el inicio del ciclo
-    uint32_t seq;               // de config_nodo_siguiente_seq; 0 = sin número
-    estado_codigo_t estado_rtc; // OK o SIN_HORA
-    uint8_t num_sensores;       // NUM_SENSORES en este ciclo
-    ciclo_sensor sensor[MAX_SENSORES]; // la posición i corresponde a TABLA_SENSORES[i]
-} ciclo;
-
 #define FORMATO_CSV 1      // subir si cambia el orden o el significado de las columnas fijas
 
 #define TAM_CABECERA_CSV 512 // bytes; criterio propio (141 B con NPK, OD y pH; con 8 sensores de 8 valores no cabría)
@@ -50,6 +32,25 @@ typedef struct ciclo
 #define TX_HTTP_DESACTIVADO    403 // dispositivo desactivado en la plataforma
 #define TX_HTTP_DUPLICADO      409 // mismo (nodo, seq) con otro contenido
 #define TX_HTTP_ERROR_SERVIDOR 500 // error del servidor o de la base de datos
+
+
+/** @brief Resultado de un sensor en un ciclo. */
+typedef struct ciclo_sensor
+{
+    estado_codigo_t codigo;       // OK o el código de fallo de ese sensor
+    uint8_t num_valores;          // posiciones válidas de valores[]; 0 si el sensor falló
+    float valores[MAX_VALORES];   // magnitudes, en el orden de nombres_datos de TABLA_SENSORES
+} ciclo_sensor;
+
+/** @brief Una vuelta de tarea_polling: hora, número de ciclo y todos los sensores. Es el elemento de cola_lecturas. */
+typedef struct ciclo
+{
+    uint32_t ts;                // segundos, UTC + OFFSET_PAIS_S; 0 si el RTC falló. Marca el inicio del ciclo
+    uint32_t seq;               // de config_nodo_siguiente_seq; 0 = sin número
+    estado_codigo_t estado_rtc; // OK o SIN_HORA
+    uint8_t num_sensores;       // NUM_SENSORES en este ciclo
+    ciclo_sensor sensor[MAX_SENSORES]; // la posición i corresponde a TABLA_SENSORES[i]
+} ciclo;
 
 /**
  * @brief Genera la cabecera del CSV a partir de TABLA_SENSORES (nunca se escribe a mano).

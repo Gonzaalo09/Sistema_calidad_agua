@@ -22,7 +22,7 @@
 #define MODEM_ESPERA_UART_MS 4600     // ms; Ton(uart) >= 4,5 s + 100 ms (inicio del sondeo)
 
 // Tiempos de Secuencia de Apagado (HD tabla 9)
-#define MODEM_ESPERA_APAGADO_MS 7000     // ms; Toff(uart) máx. 6,9 s (límite para recibir NORMAL POWER DOWN)
+#define MODEM_ESPERA_APAGADO_MS 7000 // ms; Toff(uart) máx. 6,9 s (límite para recibir NORMAL POWER DOWN)
 
 // Parámetros lógicos de la Máquina de Estados AT
 #define MODEM_SONDEOS_AT 10           // reintentos de "AT" para asegurar la sincronización de autobaud; criterio propio
@@ -39,21 +39,23 @@
 #define MODEM_TIMEOUT_REGISTRO_MS 120000 // ms; tiempo máximo de respuesta de AT+COPS= (manual 3.2.9); pasado, el ciclo sigue sin red
 #define MODEM_SONDEO_REGISTRO_MS 1000    // ms entre consultas del estado de registro mientras se espera; criterio propio
 
-#define MODEM_TAM_COMANDO 128        // bytes; el comando más largo es CNCFG o SHREQ, unos 50 B
-#define CNACT_ACTIVA 1               // <status> de AT+CNACT? cuando la conexión de datos está activa (manual 5.2.30)
-#define MODEM_TIMEOUT_CNACT_MS 85000 // ms; el manual V1.06 no da máximo ("-"): se toma el de la operación equivalente de la pila clásica (SAPBR=1, 7.2.1). Medido: 1,05–3,1 s
+#define MODEM_TAM_COMANDO 128         // bytes; el comando más largo es CNCFG o SHREQ, unos 50 B
+#define CNACT_ACTIVA 1                // <status> de AT+CNACT? cuando la conexión de datos está activa (manual 5.2.30)
+#define MODEM_TIMEOUT_CNACT_MS 85000  // ms; el manual V1.06 no da máximo ("-"): se toma el de la operación equivalente de la pila clásica (SAPBR=1, 7.2.1). Medido: 1,05–3,1 s
 #define MODEM_SONDEO_CNACT_MS 1000    // ms entre consultas de CNACT? mientras se espera la IP; criterio propio
 #define MODEM_TIMEOUT_SHCONN_MS 70000 // ms; >= el TIMEOUT de SHCONF (60 s, valor por defecto) + 10 s de margen
 #define MODEM_SHBODEXT_MS 1000        // ms que el módem espera el cuerpo; rango 100–10000 (manual 9.2.5). 525 B a 115200 baudios tardan 46 ms
 #define MODEM_PAUSA_CUERPO_MS 100     // ms entre SHBODEXT y el cuerpo; los comandos contestan en <= 20 ms (medido en el 5.1), más margen
 #define MODEM_TIMEOUT_SHREQ_MS 70000  // ms; 60 s de SHCONF "TIMEOUT" más 10 s de margen para que llegue el +SHREQ del módem
 
+#define MODEM_TIMEOUT_SAPBR_ABRIR_MS 85000  // tiempo max de respuesta de SAPBR = 1
+#define MODEM_TIMEOUT_SAPBR_CERRAR_MS 65000 // tiempo max de respuesta de SAPBR = 0
 
 // Tamaños de los textos de modem_red_t, ajustados a la pantalla
-#define MODEM_TAM_OPERADOR   11   // 10 visibles + '\0' (paso 5.5); se trunca aquí
-#define MODEM_TAM_TECNOLOGIA 7    // "NB-IOT" + '\0'
-#define MODEM_TAM_IP         16   // "255.255.255.255" + '\0'
-#define MODEM_DBM_DESCONOCIDA 0   // ningún valor de CSQ da 0 dBm
+#define MODEM_TAM_OPERADOR 11   // 10 visibles + '\0' (paso 5.5); se trunca aquí
+#define MODEM_TAM_TECNOLOGIA 7  // "NB-IOT" + '\0'
+#define MODEM_TAM_IP 16         // "255.255.255.255" + '\0'
+#define MODEM_DBM_DESCONOCIDA 0 // ningún valor de CSQ da 0 dBm
 
 /** @brief Resultado de una operación con el módem. */
 typedef enum
@@ -66,10 +68,10 @@ typedef enum
 /** @brief Paso de modem_http_post en el que falló; permite distinguir "no llega al servidor" de "el módem rechaza un comando". */
 typedef enum
 {
-    MODEM_PASO_CONFIG,     // SHCONF (URL, BODYLEN, HEADERLEN)
-    MODEM_PASO_CONEXION,   // SHCONN: abre la conexión HTTP con el servidor (manual 9.2.3)
-    MODEM_PASO_PETICION,   // SHAHEAD, SHBODEXT + cuerpo, envío de SHREQ(manda el POST)
-    MODEM_PASO_RESPUESTA   // espera de +SHREQ y lectura del código
+    MODEM_PASO_CONFIG,   // SHCONF (URL, BODYLEN, HEADERLEN)
+    MODEM_PASO_CONEXION, // SHCONN: abre la conexión HTTP con el servidor (manual 9.2.3)
+    MODEM_PASO_PETICION, // SHAHEAD, SHBODEXT + cuerpo, envío de SHREQ(manda el POST)
+    MODEM_PASO_RESPUESTA // espera de +SHREQ y lectura del código
 } modem_paso_t;
 
 /** @brief Datos de red del último ciclo, para la pantalla. */
@@ -122,7 +124,7 @@ modem_estado_t modem_abrir_datos(const char *apn, const char *usuario, const cha
  * Bloquea hasta ~140 s en el peor caso (SHCONN y +SHREQ, 70 s cada uno).
  *
  * @param dominio    URL base con el formato "http://dominio" (SHCONF "URL", máx. 64 B).
- * @param ruta       Ruta del recurso (p. ej. "/servidor_3/api/v1/medidas").
+ * @param ruta       Ruta del recurso (p. ej. "/plataforma/api/v1/medidas").
  * @param cuerpo     Cuerpo; el módem admite 1024 B (BODYLEN).
  * @param[out] codigo_out Código HTTP de +SHREQ; 0 si no llegó.
  * @param[out] paso_out   Paso en el que se está o falló (modem_paso_t); permite elegir el código de tx.
@@ -136,7 +138,7 @@ modem_estado_t modem_http_post(const char *dominio, const char *ruta, const char
  * @param intentos Número máximo de intentos (MODEM_TIMEOUT_SONDEO_MS cada uno).
  * @return MODEM_OK o MODEM_TIMEOUT.
  */
-modem_estado_t modem_sondear_at(int intentos); 
+modem_estado_t modem_sondear_at(int intentos);
 
 /**
  * @brief Espera a que el módem se registre en la red (AT+CEREG? para LTE y AT+CGREG? para GSM).
@@ -165,5 +167,17 @@ modem_estado_t modem_sim_lista(void);
  * @return MODEM_OK, MODEM_TIMEOUT si algún comando no contesta (los campos ya leídos se conservan) o MODEM_ERROR si red es NULL.
  */
 modem_estado_t modem_leer_red(modem_red_t *red);
+
+modem_estado_t modem_gnss_encender(void);
+
+modem_estado_t modem_gnss_esperar_fix(uint32_t timeout_ms, uint32_t *utc_out);
+
+modem_estado_t modem_gnss_apagar(void);
+
+modem_estado_t modem_portador_abrir(const char *apn, const char *usuario, const char *clave);
+
+modem_estado_t modem_portador_cerrar(void);
+
+modem_estado_t modem_cntp(const char *servidor, uint32_t timeout_ms, uint32_t *utc_out, int *codigo_out);
 
 #endif
