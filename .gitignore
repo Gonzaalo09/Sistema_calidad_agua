@@ -3,8 +3,6 @@ build/
 managed_components/
 dependencies.lock
 
-# Configuración generada (se reconstruye a partir de sdkconfig.defaults)
-sdkconfig
 sdkconfig.old
 
 # Editor / IDE
