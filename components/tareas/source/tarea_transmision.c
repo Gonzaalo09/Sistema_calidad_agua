@@ -28,7 +28,12 @@
 #define CLAVE_APN "claro"
 // Servidor de pruebas del compañero: HTTP sin 's' (decidido: primero solo se comprueba la conexión)
 #define DOMINIO_SERVIDOR "http://yago.alwaysdata.net"
-#define RUTA_MEDIDAS "/servidor_3/api/v1/medidas"
+#define RUTA_MEDIDAS "/plataforma/api/v1/medidas"
+
+// #define TIMEOUT_GNSS_MS 90000 // Prueba para GNSS
+
+// #define SERVIDOR_NTP "south-america.pool.ntp.org" // prueba para NTP en america del sur
+// #define TIMEOUT_CNTP_MS 120000                    // prueba para NTP no da maximo lo ponemos nosotros
 
 static const char *TAG = "transmision";
 
@@ -251,7 +256,7 @@ static int enviar_ciclo(const ciclo *lectura)
     }
     if (est == MODEM_ERROR)
     {
-        return TX_SIN_SIM; 
+        return TX_SIN_SIM;
     }
 
     // ¿Hay red? Se comprueba antes de activar datos: sin red, CNACT tardaria 85 s
@@ -290,12 +295,60 @@ static void bringup_modem(void)
         ESP_LOGE(TAG, "El modem no responde: se sigue sin transmision");
         return;
     }
+    modem_gnss_apagar();
+    // un reset a mitad de la espera del fix lo deja encendido: el módem no se reinicia con el ESP32. El retorno se ignora
+
+    // PRUEBA PARA GNSS
+    /**
+    uint32_t utc = 0;
+    uint32_t t0 = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
+    modem_gnss_encender();
+    modem_estado_t est = modem_gnss_esperar_fix(TIMEOUT_GNSS_MS, &utc);
+    ESP_LOGI(TAG, "GNSS: est %d en %lu ms, utc %lu", est, ((uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS)) - t0, utc);
+    if (est == MODEM_OK)
+    {
+        time_t tt = (time_t)utc;
+        struct tm f;
+        char txt[20];
+        gmtime_r(&tt, &f);
+        strftime(txt, sizeof(txt), "%Y-%m-%d %H:%M:%S", &f);
+        ESP_LOGI(TAG, "GNSS: UTC %s", txt);
+    }
+    modem_gnss_apagar();
+    */
 
     if (modem_sim_lista() == MODEM_OK)
     {
         if (modem_esperar_registro(MODEM_TIMEOUT_REGISTRO_MS) == MODEM_OK)
         {
-            modem_abrir_datos(APN_RED, USUARIO_APN, CLAVE_APN); // la IP queda en el log
+            if (modem_abrir_datos(APN_RED, USUARIO_APN, CLAVE_APN) == MODEM_OK) // la IP queda en el log
+            {
+                /**uint32_t utc;
+                int codigo;
+                uint32_t t0;
+                modem_estado_t est;
+                struct tm fecha;
+                char texto[20];
+
+                est = modem_portador_abrir(APN_RED, USUARIO_APN, CLAVE_APN);
+                ESP_LOGI(TAG, "portador: est %d", est);
+                if (est == MODEM_OK)
+                {
+                    t0 = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
+                    est = modem_cntp(SERVIDOR_NTP, TIMEOUT_CNTP_MS, &utc, &codigo);
+                    ESP_LOGI(TAG, "CNTP: est %d, codigo %d, en %lu ms, utc %lu", est, codigo,
+                             (unsigned long)((uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS) - t0),
+                             (unsigned long)utc);
+                    if (est == MODEM_OK)
+                    {
+                        time_t tt = (time_t)utc;
+                        gmtime_r(&tt, &fecha);
+                        strftime(texto, sizeof(texto), "%Y-%m-%d %H:%M:%S", &fecha);
+                        ESP_LOGI(TAG, "CNTP: UTC %s", texto);
+                    }
+                }
+                modem_portador_cerrar(); // siempre, aunque falle lo anterior*/
+            }
         }
     }
     else
