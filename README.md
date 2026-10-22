@@ -16,8 +16,8 @@ un ordenador**, mirando la pantalla del nodo o los datos transmitidos.
 
 Medida, pantalla de diagnóstico, microSD, envío por red móvil y puesta en
 hora automática del RTC por GNSS o por red móvil (un nodo con SIM).
-Pendiente: sincronización de la hora entre nodos, enlace LoRa y gestión de
-energía (deep sleep, solar).
+Pendiente, en este orden: gestión de energía (deep sleep, solar), enlace
+LoRa y sincronización de la hora entre nodos.
 
 ## Despliegue previsto (en desarrollo, no implementado)
 
@@ -39,8 +39,16 @@ nodo ──LoRa──┘      │                │   └──LoRa── nodo
   y sale en pantalla.
 - Todos llevan microSD. El gateway guarda también lo de sus nodos y lo
   sube al servidor.
-- Hora: el gateway la toma de una referencia UTC y sus nodos la copian en
-  cada envío. Entre envíos, cada nodo sigue con su DS3231.
+- Hora: el gateway la toma de una referencia UTC (GNSS, y la red móvil
+  como respaldo). Cada nodo corrige su reloj con el acuse de recibo de su
+  propio envío, que trae las marcas de tiempo del padre; la corrección se
+  aplica al ciclo siguiente y, entre envíos, el nodo sigue con su DS3231.
+- Todos los nodos miden en los mismos instantes: los ciclos empiezan en
+  múltiplos de 10 min de UTC (rejilla común). Dentro de un ciclo, cada
+  sensor se lee en un instante distinto y el sello de tiempo es el del
+  inicio del ciclo.
+- Los dos grupos no se comunican entre sí: lo único que los relaciona es
+  UTC, cada uno con la referencia de su propio gateway.
 
 ## Hardware
 
@@ -420,7 +428,8 @@ otro país\".
 
 ### Hora y sincronización
 
-El nodo pone en hora el DS3231 solo, con dos fuentes de UTC:
+Hoy, un nodo con SIM (el gateway del despliegue previsto) pone en hora el
+DS3231 solo, con dos fuentes de UTC:
 
 - **GNSS** (preferente): en el primer arranque de un nodo nuevo y después
   cada 2 días. Espera el fix hasta 90 s (en frío, en interior, se midieron
@@ -444,12 +453,29 @@ El estado de la hora de cada medida va en la columna `rtc`:
 | 4 | El RTC no contesta | 0 | `_SINHORA` |
 
 28 571 s es el tiempo en que un DS3231 con 3,5 ppm acumula 0,1 s de error.
-Una hora caducada se sigue usando porque el DS3231 deriva poco (~0,3 s al
-día), pero ya no tiene la exactitud garantizada: quien analice los datos
-distingue esas medidas por `rtc` = 10.
+Es un criterio propio para marcar la hora como caducada, no un requisito
+del sistema. Una hora caducada se sigue usando porque el DS3231 deriva
+poco (~0,3 s al día), pero ya no tiene la exactitud garantizada: quien
+analice los datos distingue esas medidas por `rtc` = 10.
 
 La medida que se toma mientras el nodo espera la sincronización sale con
 `ts` = 0 (se sella antes de sincronizar); las siguientes ya llevan hora.
+
+#### Previsto para los nodos sin SIM (no implementado)
+
+Un nodo sin SIM no tiene fuente de UTC propia: su referencia es el
+gateway, no UTC. Corrige su DS3231 con las marcas de tiempo que le llegan
+en el acuse de recibo de cada envío por LoRa, y la corrección se aplica al
+ciclo siguiente. Si el acuse no llega, el nodo mide igual y sigue con su
+DS3231.
+
+Los ciclos de todos los nodos empiezan en múltiplos de 10 min de UTC
+(rejilla común): el nodo despierta antes, espera a ese segundo en su
+DS3231 y entonces mide. Así el sello de tiempo de un mismo ciclo coincide
+entre nodos aunque sus relojes tengan diferencias de menos de un segundo.
+
+No se fija una cota numérica de error, ni entre nodos ni frente a UTC: se
+acepta el que resulte del mecanismo.
 
 ## Compilación
 
@@ -506,9 +532,12 @@ no escribe nada en el RTC al arrancar, las medidas salen con `rtc` = 9 y
 
 - El timestamp marca el **inicio del ciclo de muestreo**, no el instante
   exacto de cada medida: con tres sensores y timeouts de 1 s, la
-  desviación puede llegar a 3 s. Irrelevante para el muestreo previsto,
-  pero es lo primero a revisar al implementar la sincronización entre
-  nodos.
+  desviación puede llegar a 3 s. Error aceptado por diseño, también para
+  el despliegue con varios nodos: los sensores de un ciclo se leen en
+  instantes distintos y el sello es el del inicio del ciclo.
+- Los ciclos todavía no empiezan en una rejilla UTC común: el periodo se
+  cuenta desde el arranque del nodo. La rejilla llega con la gestión de
+  energía (deep sleep).
 - La hora tiene resolución de 1 s. Con GNSS el error frente a UTC es de
   decenas de ms más el retardo del aviso del módem (sin medir); con CNTP
   solo, la hora llega atrasada entre 0,3 y 1,3 s.
