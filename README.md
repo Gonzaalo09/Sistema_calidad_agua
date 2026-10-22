@@ -14,9 +14,10 @@ un ordenador**, mirando la pantalla del nodo o los datos transmitidos.
 
 ## Qué funciona hoy
 
-Medida, pantalla de diagnóstico, microSD y envío por red móvil (un nodo
-con SIM). Pendiente: sincronización de la hora entre nodos, enlace LoRa
-y gestión de energía (deep sleep, solar).
+Medida, pantalla de diagnóstico, microSD, envío por red móvil y puesta en
+hora automática del RTC por GNSS o por red móvil (un nodo con SIM).
+Pendiente: sincronización de la hora entre nodos, enlace LoRa y gestión de
+energía (deep sleep, solar).
 
 ## Despliegue previsto (en desarrollo, no implementado)
 
@@ -62,10 +63,10 @@ de `main.c` y `tarjeta_sd.c` y reescribir la parte del módem.
 | Elemento | Detalle |
 |---|---|
 | RS-485 | Módulo RS485-TTL con auto-dirección, alimentado a 3,3 V. UART2 a 9600 8N1, **TX=GPIO19, RX=GPIO18** (16 y 17 están ocupados por la PSRAM del WROVER). Los pines `TX`/`RX` del header son la consola (UART0): no conectar ahí el RS-485 |
-| Módem (T-SIM7000G) | SIM7000G por UART1 a 115200: TX del ESP32=GPIO27, RX=GPIO26; encendido (PWRKEY) por GPIO4. No conectar nada a los pines 4 y 25 del header. Hace falta SIM con datos y antena conectada |
+| Módem (T-SIM7000G) | SIM7000G por UART1 a 115200: TX del ESP32=GPIO27, RX=GPIO26; encendido (PWRKEY) por GPIO4. No conectar nada a los pines 4 y 25 del header. Hace falta SIM con datos y antena conectada. Para la hora por GNSS, antena GNSS activa en su conector |
 | Bus I2C | I2C_NUM_0, SDA=GPIO21, SCL=GPIO22 (igual en las dos placas) |
 | RTC | DS3231 (0x68) con pila CR2032, 3,3 V. EEPROM 24C32 del módulo en 0x57 |
-| OLED | SSD1306 128×64 de 0,96" (0x3C), 3,3 V |
+| OLED | SSD1306 128×64 de 0,96\" (0x3C), 3,3 V |
 | Sensores | NPK (JXCT JXBS-3001-NPK-RS, mg/kg), oxígeno disuelto (REMOND, mg/L) y pH (REMOND). 12 V comunes de una fuente externa, GND común con la placa |
 | MicroSD | Slot de la placa: CS=GPIO13, SCK=GPIO14, MOSI=GPIO15, MISO=GPIO2. El módulo externo no se usa. Los pines `SCLK`/`MISO`/`MOSI`/`CS` del header (18/19/23/5) **no** son el slot |
 
@@ -91,15 +92,14 @@ de `main.c` y `tarjeta_sd.c` y reescribir la parte del módem.
 ```
 app_main ── RS-485 y cola (tarea_polling_init), estado_sistema, config_nodo (NVS), bus I2C, RTC, OLED, SD, módem ── crea las tareas
 
-tarea_polling (5) ──cola_lecturas (1 elemento por ciclo)──> tarea_transmision (3) ──┬── modem ── servidor (HTTP)
+tarea_polling (5) ──cola_lecturas (1 elemento por ciclo)──> tarea_transmision (3) ──┬── tiempo ── modem (GNSS, CNTP) + RTC
+      │                                                          │                  ├── modem ── servidor (HTTP)
       │                                                          │                  └── tarjeta_sd
-      ├── RTC (DS3231) ──────┐                                   │ (estado de la red y de la SD)
-      ▼                      ├── i2c_bus                         ▼
-   estado_sistema  <─────────┼───────────────────────────────────┘
-      ▲                      │
-      └── tarea_pantalla (2) ─┴── pantalla_oled ── u8g2
-
-tarea_rtc (2, depuracion)
+      ├── tiempo ── RTC (DS3231) ──┐                             │ (estado de la red y de la SD)
+      ▼                            ├── i2c_bus                   ▼
+   estado_sistema  <───────────────┼─────────────────────────────┘
+      ▲                            │
+      └── tarea_pantalla (2) ──────┴── pantalla_oled ── u8g2
 ```
 
 `cola_lecturas` tiene un único consumidor. Cada elemento es un ciclo
@@ -115,16 +115,17 @@ más un registro aparte con los datos de la red móvil.
 |---|---|
 | `modbus` | Protocolo puro: CRC16, construcción de tramas (0x03) y decodificación según el tipo de dato |
 | `sensores` | `TABLA_SENSORES` y el descriptor de cada sensor |
-| `config_nodo` | ID del nodo (sacado de la MAC del chip) y número de ciclo `seq`, guardado en la memoria interna (NVS) |
+| `config_nodo` | ID del nodo (sacado de la MAC del chip) y, en la memoria interna (NVS), el número de ciclo `seq` y las marcas de la última sincronización de hora (`t_sync`, `t_gnss`) |
 | `tarjeta_sd` | Tarjeta microSD por SPI con sistema de archivos FAT: montar, desmontar, escribir. Nunca formatea |
-| `modem` | SIM7000G por comandos AT sobre UART1: encender, apagar, comprobar la SIM, esperar el registro en la red, abrir la conexión de datos, hacer un POST HTTP (devuelve el código del servidor o en qué paso falló) y leer los datos de la red (operador, tecnología, señal, IP). Todo lo que habla AT está aquí |
+| `modem` | SIM7000G por comandos AT sobre UART1: encender, apagar, comprobar la SIM, esperar el registro en la red, abrir la conexión de datos, hacer un POST HTTP (devuelve el código del servidor o en qué paso falló), leer los datos de la red (operador, tecnología, señal, IP) y obtener la hora UTC por GNSS o por CNTP. Todo lo que habla AT está aquí |
 | `i2c_bus` | Dueño único del bus I2C; cada chip registra su propio dispositivo |
 | `RTC` | Driver propio del DS3231 en tres capas, siempre en UTC |
+| `tiempo` | Decide si la hora del RTC es fiable y calcula el timestamp del país (`tiempo_ts_pais`); decide cuándo sincronizar y con qué fuente (GNSS o CNTP) y escribe el RTC (`tiempo_sincronizar`). Ver \"Hora y sincronización\" |
 | `pantalla_oled` | Driver del SSD1306 sobre U8g2: callbacks de I2C y esperas, y primitivas de dibujo por líneas |
 | `u8g2` | Librería de terceros (olikraus, BSD), copiada al repo para poder compilar sin internet |
 | `estado_sistema` | Tabla de estado por fuente, con mutex, y registro de la red. Usa tipos propios: no depende de ningún driver |
 | `registro_csv` | Formato de la línea CSV y de la trama JSON, códigos de `tx` y el tipo `ciclo` que viaja por la cola. Sin hardware |
-| `tareas` | `tarea_polling` (con `tarea_polling_init`, que prepara el RS-485 y la cola antes de crear las tareas), `tarea_transmision`, `tarea_rtc` y `tarea_pantalla` |
+| `tareas` | `tarea_polling` (con `tarea_polling_init`, que prepara el RS-485 y la cola antes de crear las tareas), `tarea_transmision` y `tarea_pantalla` |
 
 ### Añadir o modificar un sensor
 
@@ -164,7 +165,7 @@ para que no se mezclen tarjetas de nodos distintos:
 ```
 /2026/125010_2026-09-29.csv      día normal
 /2026/125010_2026-09-29_2.csv    mismo día, después de cambiar los sensores
-/125010_SINHORA.csv              medidas tomadas con el RTC sin hora
+/125010_SINHORA.csv              medidas tomadas con el RTC sin hora fiable
 ```
 
 El día es el del país de despliegue: el archivo cambia a las 00:00 locales.
@@ -173,18 +174,18 @@ Cada línea es un ciclo de medida. Columnas, en orden:
 | Columna | Contenido |
 |---|---|
 | `formato` | Versión del formato del archivo (hoy `1`) |
-| `fecha` | Fecha y hora local legibles. Vacía si el RTC no tenía hora |
-| `ts` | La misma hora en segundos desde 1970 (0 sin hora) |
+| `fecha` | Fecha y hora local legibles. Vacía si el RTC no tenía hora fiable |
+| `ts` | La misma hora en segundos desde 1970 (0 sin hora fiable) |
 | `nodo` | ID del nodo |
 | `seq` | Número de ciclo: nunca se repite en un nodo. Un hueco es un ciclo que no llegó a la tarjeta |
-| `rtc` | Código de estado del RTC |
+| `rtc` | Estado de la hora: `1` válida, `10` caducada (se usa, pero sin la exactitud garantizada), `9` no fiable (aún sin sincronizar), `4` el RTC no contesta. Ver \"Hora y sincronización\" |
 | `<sensor>_est` | Código de estado del sensor, y a continuación una columna por magnitud (`NPK_Nitrogeno`…). Si el sensor falló, sus valores quedan vacíos |
-| `tx` | Resultado del envío de ese ciclo: código HTTP del servidor (`200` = guardado) o un código propio del nodo menor que 100. Ver "Transmisión de datos" |
+| `tx` | Resultado del envío de ese ciclo: código HTTP del servidor (`200` = guardado) o un código propio del nodo menor que 100. Ver \"Transmisión de datos\" |
 
 Abrir en Excel: **Datos → Desde texto/CSV**, delimitador **punto y coma**.
 Los decimales van con **punto**: si Excel está en español y convierte
 `17.298` en `17298` o lo deja como texto, hay que indicar el punto como
-separador decimal (en "Transformar datos", cambiar el tipo de esas columnas
+separador decimal (en \"Transformar datos\", cambiar el tipo de esas columnas
 usando la configuración regional Inglés (Estados Unidos)).
 
 #### Uso de la tarjeta
@@ -208,10 +209,10 @@ usando la configuración regional Inglés (Estados Unidos)).
 
 ## Transmisión de datos
 
-En cada ciclo, `tarea_transmision` construye la trama, la envía, lee el
-estado de la red para la pantalla y después guarda la línea en la microSD
-con el resultado en la columna `tx`. Un solo intento por ciclo: lo que
-falle queda en la tarjeta con su `tx`.
+En cada ciclo, `tarea_transmision` sincroniza la hora si toca, construye
+la trama, la envía, lee el estado de la red para la pantalla y después
+guarda la línea en la microSD con el resultado en la columna `tx`. Un solo
+intento por ciclo: lo que falle queda en la tarjeta con su `tx`.
 
 1. Trama: un objeto JSON plano con las mismas claves que las columnas del
    CSV, salvo `fecha` y `tx`. Un sensor que falla, o un valor que no es un
@@ -258,6 +259,9 @@ no existe.
 - Donde no hay LTE-M, el módem usa GSM/GPRS: un envío tarda 2–3 s, pero
   pide picos de 2 A (0,6 A en LTE-M) y con batería baja puede reiniciar
   la placa.
+- Mientras el nodo espera el GNSS (hasta 90 s) o un CNTP que falla (hasta
+  ~52 s medidos) la transmisión se detiene y, con el muestreo de pruebas
+  de 20 s, se pueden perder ciclos por cola llena. Con 10 min no.
 
 ## Conectar la placa al ordenador (una vez por PC)
 
@@ -267,7 +271,7 @@ puerto COM, y sin puerto COM no se puede grabar ni ver el log.
 
 | Revisión de la T-SIM7000G | Chip puente | Driver |
 |---|---|---|
-| V1.6 (serigrafía "20-4-15") | CP2104 (Silicon Labs) | *CP210x Universal Windows Driver*, de la web de Silicon Labs |
+| V1.6 (serigrafía \"20-4-15\") | CP2104 (Silicon Labs) | *CP210x Universal Windows Driver*, de la web de Silicon Labs |
 | Revisiones posteriores | CH9102 (WCH) | *CH343SER*, de la web de WCH |
 
 1. Conectar la placa con un cable **USB-A a USB-C** que transmita datos.
@@ -275,8 +279,8 @@ puerto COM, y sin puerto COM no se puede grabar ni ver el log.
    la ve. LilyGo desaconseja los cables USB-C a USB-C.
 2. Abrir el **Administrador de dispositivos** de Windows y desplegar
    **Puertos (COM y LPT)**.
-   - Si aparece "Silicon Labs CP210x USB to UART Bridge (COMx)" o
-     "USB-Enhanced-SERIAL CH9102 (COMx)", el driver ya está: ir al
+   - Si aparece \"Silicon Labs CP210x USB to UART Bridge (COMx)\" o
+     \"USB-Enhanced-SERIAL CH9102 (COMx)\", el driver ya está: ir al
      paso 4.
    - Si no aparece, desplegar **Otros dispositivos**. Si la placa está
      ahí con un triángulo amarillo, falta el driver: paso 3.
@@ -294,21 +298,25 @@ se conecta la placa en otro puerto USB.
 
 ## Preparar un nodo antes de llevarlo al campo
 
-En los comandos, `COMx` es el puerto de la placa (ver "Conectar la placa
-al ordenador").
+En los comandos, `COMx` es el puerto de la placa (ver \"Conectar la placa
+al ordenador\").
 
-1. **Poner en hora el RTC** (si es un RTC nuevo o se ha quedado sin pila):
-   ver "Primera puesta en hora del RTC" en Compilación.
-2. **Sacar la microSD** (T-SIM7000G), **borrar la memoria del ESP32 y
-   grabar el firmware definitivo** (con `FORZAR_HORA 0`), para que el
-   contador de ciclos `seq` empiece en 1 y no arrastre los números de las
-   pruebas ni datos del firmware de fábrica:
+1. **Sacar la microSD** (T-SIM7000G), **borrar la memoria del ESP32 y
+   grabar el firmware definitivo**, para que el contador de ciclos `seq`
+   empiece en 1 y no arrastre los números de las pruebas ni datos del
+   firmware de fábrica:
    ```
    idf.py -p COMx erase-flash
    idf.py -p COMx flash
    ```
-   Esto no borra la hora (la guarda el RTC con su pila) ni cambia el ID del
-   nodo (viene del chip).
+   Esto no borra la hora del RTC (la guarda con su pila) ni cambia el ID
+   del nodo (viene del chip). Sí borra las marcas de sincronización, así
+   que el nodo vuelve a sincronizar la hora en su primer arranque.
+2. **Primer arranque, con la antena GNSS y la de red puestas y a cielo
+   abierto**: el nodo pone en hora el RTC solo (ver \"Hora y
+   sincronización\"). Las primeras medidas, hasta que termine, salen sin
+   hora (`-- SIN HORA --` en pantalla). No hace falta ponerlo en hora a
+   mano.
 3. **Apuntar el ID del nodo** en una etiqueta pegada a la caja. Sale al
    arrancar, en el log (`ID del nodo: 125010`) y en la primera línea de la
    pantalla. Son 6 letras y números sacados del propio chip: no se
@@ -319,7 +327,7 @@ al ordenador").
 5. **Dar de alta el nodo en la plataforma del servidor** con su ID. Si no,
    el servidor responde 403 (`NODO DESACTIVADO` en pantalla).
 6. Si el nodo va a **otro país que no sea Perú**, hacer antes los cambios
-   de "Desplegar en otro país".
+   de \"Desplegar en otro país\".
 
 **Una vez desplegado, no volver a usar `erase-flash` en ese nodo**: el
 contador `seq` volvería a 1 y el servidor recibiría números repetidos.
@@ -334,9 +342,9 @@ proyecto algo más que dependa del país, se apunta aquí.
 
 | Qué | Dónde se cambia | Cómo |
 |---|---|---|
-| Desfase horario del país | Firmware: `OFFSET_PAIS_S` en `tarea_rtc.h` (componente `tareas`) | Horas respecto a UTC × 3600, con signo. Perú (UTC−5): `(-5 * 3600)`. Ejemplo, Bolivia (UTC−4): `(-4 * 3600)` |
+| Desfase horario del país | Firmware: `OFFSET_PAIS_S` en `tiempo.h` (componente `tiempo`) | Horas respecto a UTC × 3600, con signo. Perú (UTC−5): `(-5 * 3600)`. Ejemplo, Bolivia (UTC−4): `(-4 * 3600)` |
 | El mismo desfase en el servidor | Servidor: campo `desfase_s` del nodo en la tabla de nodos | El mismo valor en segundos (Perú: `-18000`). Si no coincide con el del firmware, el servidor calculará mal la hora de todas las medidas de ese nodo |
-| Puesta en hora del RTC | PC con el que se compila con `FORZAR_HORA 1` | Toma la hora del PC y le resta `OFFSET_PAIS_S`: el reloj del PC tiene que estar en la hora del país de destino al compilar |
+| Servidor NTP | Firmware: `SERVIDOR_NTP` en el componente `tiempo` (hoy `south-america.pool.ntp.org`) | Servidor NTP de la región del despliegue (por ejemplo, otro del `pool.ntp.org`). Tiene que ser un servidor NTP de verdad: uno que no lo sea hace fallar la sincronización (`+CNTP: 64`). La zona del CNTP es siempre 0 (UTC) |
 | Red móvil | Tarjeta SIM y firmware: `APN_RED`, `USUARIO_APN` y `CLAVE_APN` en `tarea_transmision.c` (hoy Claro Perú: `claro.pe`, `claro`, `claro`) | SIM de un operador local, con su APN, usuario y contraseña. Comprobar qué tecnología hay en la zona y que el módem de la placa admite sus bandas: SIM7000G Cat-M1 en B1/B2/B3/B4/B5/B8/B12/B13/B18/B19/B20/B26/B28/B39 (SIMCom, Hardware Design V1.07), además de GSM/GPRS; SIM7600G, sin verificar. En Perú, en los sitios probados, solo había 2G |
 | Servidor de datos | Firmware: `DOMINIO_SERVIDOR` y `RUTA_MEDIDAS` en `tarea_transmision.c` | Dominio (`http://dominio`, máx. 64 caracteres) y ruta de la API que recibe las medidas. El nodo debe estar dado de alta y activo en esa plataforma, o el servidor responde 403 |
 | Idioma de la pantalla | Firmware: `estado_sistema.c` (`estado_sistema_texto`, `estado_sistema_accion`) y `tarea_pantalla.c` | Los mensajes están en español. Cada acción cabe en 23 caracteres. La fuente admite acentos y ñ (Latin-1), no otros alfabetos |
@@ -348,7 +356,7 @@ esos países hace falta un cambio de diseño en el firmware, todavía no
 hecho.
 
 Después de cambiar el firmware, grabar con `idf.py -p COMx flash`. Si el
-nodo es nuevo, seguir "Preparar un nodo antes de llevarlo al campo"
+nodo es nuevo, seguir \"Preparar un nodo antes de llevarlo al campo\"
 completo.
 
 ## Diagnóstico en pantalla
@@ -391,16 +399,57 @@ SD NO DETECTADA !16:20
 ```
 
 `!--:--` significa que no se ha guardado (o enviado) nada desde que se
-encendió el nodo. Sin hora en el RTC, la primera línea es
-`-- SIN HORA -- ID:AC3D04`.
+encendió el nodo.
+
+Estado de la hora (primera línea y la siguiente de la página 1):
+
+| Pantalla | Significado | Qué hacer |
+|---|---|---|
+| Reloj normal | Hora válida | — |
+| Reloj y `  hora sin sincronizar` | Hora caducada: el RTC sigue contando y se usa, pero hace más de ~8 h que no se sincroniza | Nada: se arregla solo cuando haya GNSS o red. La causa sale en la página 2 |
+| `-- SIN HORA -- ID:…` y `  esperando hora (red)` | El RTC contesta, pero la hora aún no es fiable (nodo nuevo o pila agotada) | Esperar a la primera sincronización; comprobar antenas |
+| `-- SIN HORA -- ID:…` y `  RTC no contesta` | El RTC no responde | Revisar el módulo RTC y su cableado |
 
 ## Convención de tiempo
 
 El RTC y cualquier referencia externa (GNSS, NTP) trabajan siempre en UTC.
 El timestamp de cada medida es UTC + `OFFSET_PAIS_S`, es decir, la hora
 local del país de despliegue, como `uint32_t` en segundos desde 1970.
-Perú: −5 h, sin horario de verano. Para otro país, ver "Desplegar en
-otro país".
+Perú: −5 h, sin horario de verano. Para otro país, ver \"Desplegar en
+otro país\".
+
+### Hora y sincronización
+
+El nodo pone en hora el DS3231 solo, con dos fuentes de UTC:
+
+- **GNSS** (preferente): en el primer arranque de un nodo nuevo y después
+  cada 2 días. Espera el fix hasta 90 s (en frío, en interior, se midieron
+  ~71 s; en caliente, menos de 5 s). Siempre escribe el RTC.
+- **CNTP** (respaldo, por la red móvil): si el GNSS no consigue fix, en el
+  mismo ciclo; y después cada 4 h desde la última sincronización correcta.
+  Solo escribe el RTC si no tenía hora válida o si la diferencia con el
+  servidor es de 2 s o más; si no, solo renueva la marca de sincronización.
+  Un CNTP fallido no guarda nada y se reintenta en el ciclo siguiente.
+
+Las marcas de la última sincronización (`t_sync`, `t_gnss`) están en la
+memoria interna y sobreviven a los reinicios.
+
+El estado de la hora de cada medida va en la columna `rtc`:
+
+| `rtc` | Caso | `ts` | Archivo |
+|---|---|---|---|
+| 1 | Válida: sincronizada hace menos de 28 571 s (~7,9 h) | Hora del RTC | Del día |
+| 10 | Caducada: más de 28 571 s desde la última sincronización, pero el oscilador no se ha parado | Hora del RTC | Del día |
+| 9 | No fiable: oscilador parado (OSF), nunca sincronizado o hora incoherente | 0 | `_SINHORA` |
+| 4 | El RTC no contesta | 0 | `_SINHORA` |
+
+28 571 s es el tiempo en que un DS3231 con 3,5 ppm acumula 0,1 s de error.
+Una hora caducada se sigue usando porque el DS3231 deriva poco (~0,3 s al
+día), pero ya no tiene la exactitud garantizada: quien analice los datos
+distingue esas medidas por `rtc` = 10.
+
+La medida que se toma mientras el nodo espera la sincronización sale con
+`ts` = 0 (se sella antes de sincronizar); las siguientes ya llevan hora.
 
 ## Compilación
 
@@ -431,8 +480,8 @@ necesita el nodo y por qué.
 
 menuconfig se abre en el ordenador, **sin la placa conectada**: edita
 `sdkconfig`, y los cambios llegan a la placa al compilar y grabar.
-Se abre con `idf.py menuconfig` (o el icono de engranaje "SDK
-Configuration Editor" de la extensión ESP-IDF). Se navega con las flechas,
+Se abre con `idf.py menuconfig` (o el icono de engranaje \"SDK
+Configuration Editor\" de la extensión ESP-IDF). Se navega con las flechas,
 `S` guarda y `Q` sale. Después, `idf.py build`.
 
 | Opción (ruta en menuconfig) | Valor | Por qué |
@@ -441,43 +490,28 @@ Configuration Editor" de la extensión ESP-IDF). Se navega con las flechas,
 | Partition Table | **No cambiar** | Si se mueve la partición `nvs`, el nodo pierde el contador `seq` |
 | Component config → Hardware Settings → Chip revision → Minimum Supported ESP32 Revision | **Rev v0.0** (por defecto) | Hay T-SIM7000G con chips de revisión antigua (v1.0) y moderna (v3.1). Con el mínimo en v0.0 el firmware arranca en todas; con un mínimo mayor que el del chip (p. ej. v3.0 en una placa v1.0), el bootloader se niega a arrancar (`Image requires chip rev >= v3.0`) |
 | Component config → ESP PSRAM → Support for external, SPI-connected RAM | **Desactivada** (por defecto) | El firmware no necesita la RAM externa. Pendiente de decisión definitiva |
-| Component config → FAT Filesystem support → Long filename support | **Activada** (cualquier modo salvo "No long filenames") | Los archivos de la SD tienen nombres largos (`125010_2026-09-29.csv`). Sin esto no se pueden crear |
-
-### Primera puesta en hora del RTC
-
-`FORZAR_HORA 1` en `main.c` pone el RTC a la hora a la que se **compiló**
-`main.c` (no a la hora del arranque), y lo vuelve a hacer en cada
-reinicio, incluido el que provoca abrir el monitor. Procedimiento:
-
-1. Sacar la microSD y poner `FORZAR_HORA 1`. Se escribe la hora de la
-   última compilación de `main.c`, y `main.c` solo se recompila si cambia:
-   si ya estaba a 1, guárdalo o cambia su fecha antes de grabar
-   (PowerShell: `(Get-Item main\main.c).LastWriteTime = Get-Date`). Si no,
-   cada arranque vuelve a escribir una hora antigua y parece que el RTC no
-   cuenta.
-2. `idf.py -p COMx flash`: compila y graba seguido, así que el error es
-   solo lo que tardan el enlazado y la grabación (decenas de segundos).
-3. Sin reiniciar entre medias, poner `FORZAR_HORA 0` y volver a grabar.
-   Desde ahí la hora se conserva en cada reinicio.
-
-El PC que compila debe estar en la zona horaria del país de despliegue.
-
-Al arrancar, el log muestra la hora del RTC y sus registros de control y
-estado, antes de escribir nada: `0Eh=0x1C (EOSC=0), 0Fh=0x08 (OSF=0)` es lo
-normal. Con OSF = 1 el oscilador se paró (pila agotada o quitada): el nodo
-no escribe nada en el RTC y hay que volver a ponerlo en hora.
-La puesta en hora automática (GNSS o red móvil) está en desarrollo.
+| Component config → FAT Filesystem support → Long filename support | **Activada** (cualquier modo salvo \"No long filenames\") | Los archivos de la SD tienen nombres largos (`125010_2026-09-29.csv`). Sin esto no se pueden crear |
 
 Si la T-SIM7000G no entra en modo de grabación (y la microSD ya está
 fuera): unir IO0 con GND con un cable, pulsar RST, soltarlo, quitar el
 cable y grabar.
+
+Al arrancar, el log muestra la hora del RTC y sus registros de control y
+estado, antes de escribir nada: `0Eh=0x1C (EOSC=0), 0Fh=0x08 (OSF=0)` es lo
+normal. Con OSF = 1 el oscilador se paró (pila agotada o quitada): el nodo
+no escribe nada en el RTC al arrancar, las medidas salen con `rtc` = 9 y
+`ts` = 0, y la primera sincronización (GNSS o red) le devuelve la hora.
 
 ## Limitaciones conocidas
 
 - El timestamp marca el **inicio del ciclo de muestreo**, no el instante
   exacto de cada medida: con tres sensores y timeouts de 1 s, la
   desviación puede llegar a 3 s. Irrelevante para el muestreo previsto,
-  pero es lo primero a revisar al implementar la sincronización.
+  pero es lo primero a revisar al implementar la sincronización entre
+  nodos.
+- La hora tiene resolución de 1 s. Con GNSS el error frente a UTC es de
+  decenas de ms más el retardo del aviso del módem (sin medir); con CNTP
+  solo, la hora llega atrasada entre 0,3 y 1,3 s.
 - El electrodo de oxígeno disuelto necesita 4 h de polarización tras
   cualquier corte de alimentación antes de dar medidas fiables.
 - El NPK tarda hasta 10 s en estabilizarse al alimentarlo: la primera
@@ -490,4 +524,4 @@ cable y grabar.
   microSD (`MODEM NO CONTESTA` en pantalla), pero no lo vuelve a encender
   hasta que se reinicie.
 - El desfase horario es fijo: el nodo no sirve tal cual en países con
-  horario de verano (ver "Desplegar en otro país").
+  horario de verano (ver \"Desplegar en otro país\").

@@ -3,7 +3,6 @@
  * Fuentes: ESP-IDF v6.1, "UART"; DS3231 datasheet (Analog Devices), registro de estado 0Fh (OSF).
  */
 #include <stdio.h>
-#include <string.h>
 #include <time.h>
 
 #include "freertos/FreeRTOS.h"
@@ -16,20 +15,21 @@
 #include "tarea_transmision.h"
 #include "i2c_bus.h"
 #include "RTC.h"
-#include "tarea_rtc.h"
 #include "pantalla_oled.h"
 #include "estado_sistema.h"
 #include "tarea_pantalla.h"
 #include "config_nodo.h"
 #include "tarjeta_sd.h"
 #include "modem.h"
+#include "tiempo.h"
 
 static const char *TAG = "main";
 
-// 1 = en cada arranque el RTC se pone a la hora de compilación (andamiaje). Desplegar siempre con 0.
-#define FORZAR_HORA 0
- 
-static struct tm hora_compilacion_a_utc(void)
+// 1 = en cada arranque el RTC se pone a la hora de compilación (andamiaje). Desplegar siempre con 0. Por si acaso hay que forzarla, se hace sincronizando pero por si acaso
+// #define FORZAR_HORA 0
+
+/**
+ * static struct tm hora_compilacion_a_utc(void)
 {
     static const char *meses[] = {
         "Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -72,6 +72,8 @@ static struct tm hora_compilacion_a_utc(void)
     gmtime_r(&epoch_utc, &utc);
     return utc;
 }
+ */
+
 // ============ FIN ANDAMIAJE TEMPORAL ============
 
 void app_main(void)
@@ -138,7 +140,8 @@ void app_main(void)
 
         // OSF=1: el oscilador se paró y la hora no es fiable. Solo se comprueba aquí, al arrancar.
         rtc_estado_t est_osc = rtc_comprobar_oscilador();
-        if (FORZAR_HORA)
+        /** Esto es por si hay que forzar la hora 
+         * if (FORZAR_HORA)
         {
             struct tm utc = hora_compilacion_a_utc();
             ESP_LOGW(TAG, "Fijando hora PROVISIONAL (compilación)");
@@ -149,10 +152,11 @@ void app_main(void)
             }
             estado_sistema_publicar(FUENTE_RTC, NULL, 0, 0, ESTADO_SIN_HORA);
         }
-        else if (est_osc == RTC_OSCILADOR_PARADO)
+        */
+        if (est_osc == RTC_OSCILADOR_PARADO)
         {
             ESP_LOGW(TAG, "OSF=1: hora no fiable, no se escribe");
-            estado_sistema_publicar(FUENTE_RTC, NULL, 0, 0, ESTADO_SIN_HORA);
+            estado_sistema_publicar(FUENTE_RTC, NULL, 0, 0, ESTADO_HORA_NO_VALIDA);
         }
         else if (est_osc == RTC_OK)
         {
@@ -186,7 +190,6 @@ void app_main(void)
         ESP_LOGW(TAG, "SD no disponible al arrancar (%d)", est_sd);
     }
 
-    
     if (modem_init() != MODEM_OK)
     {
         ESP_LOGE(TAG, "Fallo configurando el UART1 o el PWRKEY del modem");
@@ -196,6 +199,5 @@ void app_main(void)
     // Pila libre mínima medida con 6144 B en transmisión: ~3300 B (AC3D04). Criterio: subir si baja de 1 KB.
     xTaskCreate(tarea_polling, "polling", 4096, NULL, 5, NULL);
     xTaskCreate(tarea_transmision, "transmision", 6144, NULL, 3, NULL);
-    xTaskCreate(tarea_rtc, "rtc_debug", 4096, NULL, 2, NULL);
     xTaskCreate(tarea_pantalla, "pantalla", 4096, NULL, 2, NULL);
 }

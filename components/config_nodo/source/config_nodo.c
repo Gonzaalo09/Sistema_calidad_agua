@@ -55,7 +55,7 @@ static void leer_marca(const char *clave, uint32_t *copia)
     *copia = 0; // No nos fiamos si hay un error de lo que hubiese guardado
     if (err != ESP_ERR_NVS_NOT_FOUND)
     {
-        ESP_LOGE(TAG, "No se pudo leer %s: %ls", clave, esp_err_to_name(err));
+        ESP_LOGE(TAG, "No se pudo leer %s: %s", clave, esp_err_to_name(err));
     }
 }
 

@@ -19,6 +19,7 @@
 #include "tarjeta_sd.h"
 #include "registro_csv.h"
 #include "modem.h"
+#include "tiempo.h"
 
 #define MAX_ARCHIVOS_DIA 9 // archivos del dia: base, _2 .. _9 si cambian los sensores el mismo dia; criterio propio
 
@@ -29,11 +30,6 @@
 // Servidor de pruebas del compañero: HTTP sin 's' (decidido: primero solo se comprueba la conexión)
 #define DOMINIO_SERVIDOR "http://yago.alwaysdata.net"
 #define RUTA_MEDIDAS "/plataforma/api/v1/medidas"
-
-// #define TIMEOUT_GNSS_MS 90000 // Prueba para GNSS
-
-// #define SERVIDOR_NTP "south-america.pool.ntp.org" // prueba para NTP en america del sur
-// #define TIMEOUT_CNTP_MS 120000                    // prueba para NTP no da maximo lo ponemos nosotros
 
 static const char *TAG = "transmision";
 
@@ -377,6 +373,8 @@ void tarea_transmision(void *parametros)
     while (1)
     {
         xQueueReceive(get_cola_lecturas(), &lectura, portMAX_DELAY);
+
+        tiempo_sincronizar(APN_RED, USUARIO_APN, CLAVE_APN);
 
         imprimir_ciclo(&lectura);
 

@@ -15,10 +15,10 @@
 #include "modbus.h"
 #include "sensores.h"
 #include "tarea_polling.h"
-#include "tarea_rtc.h"
 #include "estado_sistema.h"
 #include "config_nodo.h"
 #include "registro_csv.h"
+#include "tiempo.h"
 
 #define TIMEOUT_RESPUESTA_MS 1000   // ms hasta que un sensor empieza a contestar; criterio propio
 #define TIMEOUT_LECTURA_UART_MS 100 // ms al leer los bytes ya recibidos; criterio propio
@@ -27,14 +27,14 @@
 
 // Pines de UART2 hacia el modulo RS485-TTL, vistos desde el ESP32.
 // Con TX=18/RX=19 los tres sensores daban timeout (30/09/2026): el cableado real cruza al revés.
-#define RS485_PIN_TX 19 // GPIO de TX; sale del ESP32 hacia el modulo
-#define RS485_PIN_RX 18 // GPIO de RX; entra al ESP32 desde el modulo
+#define RS485_PIN_TX 19           // GPIO de TX; sale del ESP32 hacia el modulo
+#define RS485_PIN_RX 18           // GPIO de RX; entra al ESP32 desde el modulo
 #define RS485_BAUDIOS 9600        // baudios (8N1); tiene que coincidir con todos los sensores del bus (datasheets)
 #define RS485_TAM_COLA_EVENTOS 10 // eventos de la UART pendientes (uart_queue); criterio propio
 #define RS485_TAM_BUFFER 256      // bytes de los buffers RX y TX de la UART2; criterio propio (una respuesta Modbus cabe de sobra)
 
-static QueueHandle_t uart_queue;     // eventos de la UART2
-static QueueHandle_t cola_lecturas;  // ciclos de tarea_polling hacia tarea_transmision
+static QueueHandle_t uart_queue;    // eventos de la UART2
+static QueueHandle_t cola_lecturas; // ciclos de tarea_polling hacia tarea_transmision
 
 static const char *TAG = "polling";
 
@@ -88,20 +88,37 @@ void tarea_polling(void *parametros)
 
         lectura.seq = config_nodo_siguiente_seq();
 
-        // Una sola lectura del RTC por ciclo: todos los sensores comparten el ts del inicio del ciclo
-        // (una medida puede salir sellada hasta unos segundos antes de tomarse).
-        uint32_t ts = rtc_timestamp_pais();
-        if (ts == 0)
+        uint32_t ts;
+        tiempo_estado_t est_t = tiempo_ts_pais(&ts);
+
+        switch (est_t)
         {
-            lectura.estado_rtc = ESTADO_SIN_HORA;
-            ESP_LOGW(TAG, "Timestamp no fiable, el RTC no responde");
-            estado_sistema_publicar(FUENTE_RTC, NULL, 0, 0, ESTADO_SIN_HORA);
-        }
-        else
-        {
-            estado_sistema_publicar(FUENTE_RTC, NULL, 0, ts, ESTADO_OK);
+        case (TIEMPO_OK):
             lectura.ts = ts;
             lectura.estado_rtc = ESTADO_OK;
+            estado_sistema_publicar(FUENTE_RTC, NULL, 0, ts, ESTADO_OK);
+            break;
+
+        case (TIEMPO_SIN_RTC):
+            lectura.ts = 0;
+            lectura.estado_rtc = ESTADO_SIN_HORA;
+            ESP_LOGW(TAG, "RTC no respode");
+            estado_sistema_publicar(FUENTE_RTC, NULL, 0, 0, ESTADO_SIN_HORA);
+            break;
+
+        case (TIEMPO_NO_VALIDA):
+            lectura.ts = 0;
+            lectura.estado_rtc = ESTADO_HORA_NO_VALIDA;
+            ESP_LOGW(TAG, "Hora no valida (sin sincronización u OSF)");
+            estado_sistema_publicar(FUENTE_RTC, NULL, 0, 0, ESTADO_HORA_NO_VALIDA);
+            break;
+
+        case (TIEMPO_CADUCADA):
+            lectura.ts = ts;
+            lectura.estado_rtc = ESTADO_HORA_CADUCADA;
+            ESP_LOGW(TAG, "hora sin sincronizar (caducada)");
+            estado_sistema_publicar(FUENTE_RTC, NULL, 0, ts, ESTADO_HORA_CADUCADA);
+            break;
         }
 
         for (size_t i = 0; i < NUM_SENSORES; i++)
@@ -123,7 +140,6 @@ void tarea_polling(void *parametros)
                  printf("%02X ", peticion[j]);
              }
              printf("\n");*/
-             
 
             uart_write_bytes(RS485_UART, peticion, MODBUS_TAM_PETICION);
 
@@ -155,10 +171,10 @@ void tarea_polling(void *parametros)
                             {
                                 trama_ok = true;
 
-                               // Para ver por pantalla la trama que recibes
-                               /* for (int k = 0; k < longitud; k++)
-                                    printf("%02X ", datos_rx[k]);
-                                 */   
+                                // Para ver por pantalla la trama que recibes
+                                /* for (int k = 0; k < longitud; k++)
+                                     printf("%02X ", datos_rx[k]);
+                                  */
                             }
                         }
                     }

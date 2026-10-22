@@ -16,14 +16,14 @@
 #include "estado_sistema.h"
 #include "config_nodo.h"
 #include "pantalla_oled.h"
-#include "tarea_rtc.h"
 #include "tarea_pantalla.h"
 #include "registro_csv.h"
+#include "tiempo.h"
 
-#define REFRESCO_MS 1000        // ms entre repintados; el reloj con segundos es el latido del firmware
-#define SEGUNDOS_POR_PAGINA 5   // repintados (= segundos con REFRESCO_MS 1000) antes de cambiar de página; criterio propio
-#define NUM_PAGINAS 2           // página 0: sensores; página 1: red + SD
-#define TAM_TEXTO_ENVIO 18 // 17 caracteres como maximo + '\0': con " !hh:mm" caben las 25 columnas
+#define REFRESCO_MS 1000      // ms entre repintados; el reloj con segundos es el latido del firmware
+#define SEGUNDOS_POR_PAGINA 5 // repintados (= segundos con REFRESCO_MS 1000) antes de cambiar de página; criterio propio
+#define NUM_PAGINAS 2         // página 0: sensores; página 1: red + SD
+#define TAM_TEXTO_ENVIO 18    // 17 caracteres como maximo + '\0': con " !hh:mm" caben las 25 columnas
 
 /**
  * @brief Añade texto al final de una linea sin desbordarla; devuelve la nueva longitud usada (nunca mayor que tam-1).
@@ -70,15 +70,10 @@ static void pintar_reloj(void)
     char linea[PANTALLA_COLUMNAS + 1];
     char hora[15]; // "29/09 14:38:05" + '\0'
 
-    uint32_t ts = rtc_timestamp_pais();
+    uint32_t ts;
+    tiempo_estado_t est = tiempo_ts_pais(&ts);
 
-    if (ts == 0)
-    {
-        snprintf(linea, sizeof(linea), "-- SIN HORA -- ID:%s", config_nodo_id());
-        pantalla_oled_texto(0, linea);
-        pantalla_oled_texto(1, "  RTC no contesta");
-    }
-    else
+    if (est == TIEMPO_OK || est == TIEMPO_CADUCADA)
     {
         time_t t = (time_t)ts;
         struct tm local;
@@ -90,6 +85,23 @@ static void pintar_reloj(void)
         snprintf(linea, sizeof(linea), "%s ID:%s", hora, config_nodo_id());
 
         pantalla_oled_texto(0, linea);
+        if (est == TIEMPO_CADUCADA)
+        {
+            pantalla_oled_texto(1, "  hora sin sincronizar");
+        }
+    }
+    else
+    {
+        snprintf(linea, sizeof(linea), "-- SIN HORA -- ID:%s", config_nodo_id());
+        pantalla_oled_texto(0, linea);
+        if (est == TIEMPO_SIN_RTC)
+        {
+            pantalla_oled_texto(1, "  RTC no contesta");
+        }
+        else
+        {
+            pantalla_oled_texto(1, "  esperando hora (red)");
+        }
     }
 }
 

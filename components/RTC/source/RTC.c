@@ -7,6 +7,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <time.h>
 
 #include "driver/i2c_master.h"
 #include "esp_log.h"
@@ -72,55 +73,6 @@ static uint8_t dias_del_mes(uint16_t anio, uint8_t mes)
 }
 
 /**
- * @brief Día de la semana, 1..7 (1 = domingo ... 7 = sábado).
- *
- * Precondiciones: anio es el año completo (2026, no tm_year) y mes ya está validado (1..12).
- * El DS3231 solo exige que el registro cuente 1..7; el criterio 1 = domingo es propio.
- */
-static uint8_t dia_semana(int anio, int mes, int dia)
-{
-    static const int t[] = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4};
-
-    if (mes < 3)
-    {
-        anio--; // enero y febrero cuentan como del año anterior
-    }
-    int dow = (anio + anio / 4 - anio / 100 + anio / 400 + t[mes - 1] + dia) % 7; // 0 = domingo
-    return (uint8_t)(dow + 1);
-}
-
-/** @brief Días completos desde el 1970-01-01 hasta esa fecha (año completo, mes 1..12). */
-static int64_t dias_desde_1970(uint16_t anio, uint8_t mes, uint8_t dia)
-{
-    int64_t dias = 0;
-
-    for (uint16_t a = 1970; a < anio; a++)
-    {
-        dias += es_bisiesto(a) ? 366 : 365;
-    }
-    for (uint8_t m = 1; m < mes; m++)
-    {
-        dias += dias_del_mes(anio, m);
-    }
-    dias += dia - 1;
-
-    return dias;
-}
-
-/**
- * @brief Segundos Unix de un struct tm en UTC, para poder restar horas.
- *
- * Sustituye a mktime, que depende de TZ.
- */
-static int64_t tm_a_segundos_utc(const struct tm *t)
-{
-    uint16_t anio = t->tm_year + 1900;
-    uint8_t mes = t->tm_mon + 1;
-    int64_t dias = dias_desde_1970(anio, mes, t->tm_mday);
-    return dias * 86400 + t->tm_hour * 3600 + t->tm_min * 60 + t->tm_sec;
-}
-
-/**
  * @brief Decodifica los 7 registros BCD (seg, min, hora, día semana, día, mes, año) a struct tm.
  * @return RTC_OK, o RTC_HORA_INCOHERENTE si está en modo 12 h o algún campo está fuera de rango.
  */
@@ -134,7 +86,7 @@ static rtc_estado_t decodificar_hora(const uint8_t bcd[7], struct tm *utc)
 
     uint8_t seg = bcd_a_dec(bcd[0] & MASK_SEG_MIN);
     uint8_t min = bcd_a_dec(bcd[1] & MASK_SEG_MIN);
-    // bcd[3] (día de la semana) no se usa al leer: dia_semana() lo calcula al escribir
+    // bcd[3] (día de la semana) no se usa al leer: codificar_hora() lo calcula al escribir
     uint8_t hora = bcd_a_dec(bcd[2] & MASK_HORA_24H);
     uint8_t dia = bcd_a_dec(bcd[4] & MASK_DIA);
     uint8_t mes = bcd_a_dec(bcd[5] & MASK_MES); // 1..12, tal cual lo entrega el chip
@@ -174,6 +126,10 @@ static rtc_estado_t codificar_hora(const struct tm *utc, uint8_t bcd[7])
     uint8_t mes = utc->tm_mon + 1;
     uint16_t anio = utc->tm_year + 1900;
 
+    struct tm copia = *utc; 
+    copia.tm_isdst = 0;
+    mktime(&copia); 
+
     if ((seg > 59) || (min > 59) || (hora > 23) || (mes < 1) || (mes > 12) || (anio < 2000) || (anio > 2099))
     {
         return RTC_HORA_INCOHERENTE;
@@ -186,7 +142,7 @@ static rtc_estado_t codificar_hora(const struct tm *utc, uint8_t bcd[7])
     bcd[0] = dec_a_bcd(seg);
     bcd[1] = dec_a_bcd(min);
     bcd[2] = dec_a_bcd(hora);
-    bcd[3] = dec_a_bcd(dia_semana(anio, mes, dia));
+    bcd[3] = dec_a_bcd(copia.tm_wday + 1);
     bcd[4] = dec_a_bcd(dia);
     bcd[5] = dec_a_bcd(mes);
     bcd[6] = dec_a_bcd(anio - 2000);
@@ -332,6 +288,8 @@ rtc_estado_t rtc_leer_hora(struct tm *utc)
 rtc_estado_t rtc_fijar_hora(const struct tm *utc)
 {
     uint8_t datos[7];
+    struct tm escrita = *utc; 
+    escrita.tm_isdst = 0;
 
     rtc_estado_t est = codificar_hora(utc, datos);
 
@@ -356,7 +314,7 @@ rtc_estado_t rtc_fijar_hora(const struct tm *utc)
         return est;
     }
 
-    if (llabs(tm_a_segundos_utc(&leido) - tm_a_segundos_utc(utc)) > 2)
+    if (llabs(mktime(&leido) - mktime(&escrita)) > 2)
     {
         return RTC_HORA_INCOHERENTE;
     }

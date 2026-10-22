@@ -202,6 +202,12 @@ const char *estado_sistema_texto(estado_codigo_t codigo)
     case ESTADO_SD_ERROR_ESCRITURA: 
         return "ERROR ESCRITURA";
 
+    case ESTADO_HORA_NO_VALIDA: 
+        return "HORA NO VALIDA";
+    
+    case ESTADO_HORA_CADUCADA: 
+        return "HORA CADUCADA"; 
+
     default:
         return "?";
     }
@@ -231,6 +237,12 @@ const char *estado_sistema_accion(estado_codigo_t codigo)
 
     case ESTADO_SD_ERROR_ESCRITURA: 
         return "cambiar tarjeta";
+
+    case ESTADO_HORA_NO_VALIDA:
+        return ""; 
+
+    case ESTADO_HORA_CADUCADA: 
+        return "";
 
     default:
         return "";

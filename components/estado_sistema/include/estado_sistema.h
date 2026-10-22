@@ -29,11 +29,13 @@ typedef enum
     ESTADO_OK,  
     ESTADO_SIN_RESPUESTA, // Timeout: no contesta nada
     ESTADO_TRAMA_INVALIDA, // contesto, CRC o longitud mal
-    ESTADO_SIN_HORA, // no hay hora fiable: el RTC no responde, o se puso una hora provisional al arrancar
+    ESTADO_SIN_HORA, // el RTC no responde, o se puso una hora provisional al arrancar
     ESTADO_SD_AUSENTE, // La SD no responde (no está o mal contacto)
     ESTADO_SD_SIN_FORMATO, // responde, pero no se puede montar (sin formato, exFAT o dañada)
     ESTADO_SD_LLENA, // SD está llena
-    ESTADO_SD_ERROR_ESCRITURA // Estaba montada y falla al escribir
+    ESTADO_SD_ERROR_ESCRITURA, // Estaba montada y falla al escribir
+    ESTADO_HORA_NO_VALIDA, // RTC contesta, pero OSF, hora incoherente o nunca sincronizado: ts = 0
+    ESTADO_HORA_CADUCADA   // RTC contesta y OSF = 0, sin sincronizar desde hace VALIDEZ_S o más: ts aproximado
 } estado_codigo_t; 
 
 /** @brief Una fila de la tabla: estado de una fuente (RTC, pantalla, red, SD o una petición Modbus). */
