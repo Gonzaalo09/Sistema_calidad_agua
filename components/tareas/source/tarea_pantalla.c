@@ -11,6 +11,8 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_err.h"
+#include "esp_log.h"
 
 #include "sensores.h"
 #include "estado_sistema.h"
@@ -24,6 +26,14 @@
 #define SEGUNDOS_POR_PAGINA 5 // repintados (= segundos con REFRESCO_MS 1000) antes de cambiar de página; criterio propio
 #define NUM_PAGINAS 2         // página 0: sensores; página 1: red + SD
 #define TAM_TEXTO_ENVIO 18    // 17 caracteres como maximo + '\0': con " !hh:mm" caben las 25 columnas
+#define PANTALLA_ESPERA_PARO_MS 2000
+#define PANTALLA_SONDEO_PARO_MS 50 
+
+static const char *TAG = "tarea_pantalla";
+
+
+static volatile bool pedir_parada = false; // La escribe tarea_pantalla_detener, la lee tarea_pantalla
+static volatile bool parada_hecha = false; // al revés
 
 /**
  * @brief Añade texto al final de una linea sin desbordarla; devuelve la nueva longitud usada (nunca mayor que tam-1).
@@ -133,7 +143,8 @@ static void pintar_pagina_datos(void)
             continue;
         }
 
-        bool fallo = (e.codigo != ESTADO_OK) && (e.codigo != ESTADO_SIN_DATOS);
+        bool sin_dato_aun = (e.codigo == ESTADO_SIN_DATOS) && (e.num_valores == 0);  
+        bool fallo = (e.codigo != ESTADO_OK) && !sin_dato_aun;
 
         size_t n = 0;
         n = anadir(linea, sizeof(linea), n, "%-4s", e.nombre);
@@ -375,6 +386,22 @@ static void pintar_pagina_red(void)
     pintar_sd();
 }
 
+void tarea_pantalla_detener(void) 
+{
+    uint32_t esperado_ms = 0; 
+
+    pedir_parada = true; 
+    while (!parada_hecha && (esperado_ms < PANTALLA_ESPERA_PARO_MS))
+    {
+        vTaskDelay(pdMS_TO_TICKS(PANTALLA_SONDEO_PARO_MS)); 
+        esperado_ms += PANTALLA_SONDEO_PARO_MS;
+    }
+    if (!parada_hecha)
+    {
+        ESP_LOGW(TAG, "la pantalla no paro en %lu ms: se duerme igual", (unsigned long)esperado_ms);
+    }
+}
+
 void tarea_pantalla(void *parametros)
 {
     uint8_t pagina = 0;
@@ -382,6 +409,12 @@ void tarea_pantalla(void *parametros)
 
     while (1)
     {
+        if (pedir_parada)
+        {
+            pantalla_oled_apagar(); 
+            parada_hecha = true; 
+            vTaskDelete(NULL); 
+        }
         // Sin pantalla las primitivas no hacen nada, pero la tarea sigue viva por
         // si algun dia se reintenta pantalla_oled_init().
         pantalla_oled_limpiar();

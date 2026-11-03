@@ -80,6 +80,8 @@ void tarea_polling(void *parametros)
     uart_event_t evento;
     ciclo lectura;
 
+    tiempo_esperar_marca(); 
+
     TickType_t proximo_ciclo = xTaskGetTickCount();
 
     while (1)
@@ -213,9 +215,16 @@ void tarea_polling(void *parametros)
             ESP_LOGE(TAG, "cola llena: ciclo perdido");
         }
 
-        // El periodo se cuenta desde el arranque de la tarea, no desde una rejilla UTC
-        vTaskDelayUntil(&proximo_ciclo, pdMS_TO_TICKS(PERIODO_MUESTREO_MS));
-        ESP_LOGI(TAG, "pila libre minima: %u B", (unsigned)uxTaskGetStackHighWaterMark(NULL));
+        if (MODO_DEPURACION)
+        {
+            // El periodo se cuenta desde el arranque de la tarea, no desde una rejilla UTC
+            vTaskDelayUntil(&proximo_ciclo, pdMS_TO_TICKS(PERIODO_MUESTREO_MS));
+            ESP_LOGI(TAG, "pila libre minima: %u B", (unsigned)uxTaskGetStackHighWaterMark(NULL));
+        }
+        else 
+        {
+            vTaskDelete(NULL); // un ciclo y se termina; la cola y el resto siguen
+        }
     }
 }
 

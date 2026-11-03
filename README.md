@@ -14,9 +14,11 @@ un ordenador**, mirando la pantalla del nodo o los datos transmitidos.
 
 ## Qué funciona hoy
 
-Medida, pantalla de diagnóstico, microSD, envío por red móvil y puesta en
-hora automática del RTC por GNSS o por red móvil (un nodo con SIM).
-Pendiente, en este orden: gestión de energía (deep sleep, solar), enlace
+Medida, pantalla de diagnóstico, microSD, envío por red móvil, puesta en
+hora automática del RTC por GNSS o por red móvil (un nodo con SIM) y ciclo
+de bajo consumo: el nodo duerme entre ciclos (deep sleep) y mide en los
+múltiplos del periodo de UTC (rejilla). Validado en banco con la
+T-SIM7000G. Pendiente, en este orden: presupuesto de energía solar, enlace
 LoRa y sincronización de la hora entre nodos.
 
 ## Despliegue previsto (en desarrollo, no implementado)
@@ -44,7 +46,8 @@ nodo ──LoRa──┘      │                │   └──LoRa── nodo
   propio envío, que trae las marcas de tiempo del padre; la corrección se
   aplica al ciclo siguiente y, entre envíos, el nodo sigue con su DS3231.
 - Todos los nodos miden en los mismos instantes: los ciclos empiezan en
-  múltiplos de 10 min de UTC (rejilla común). Dentro de un ciclo, cada
+  múltiplos del periodo de UTC (rejilla común; hoy 10 min en las pruebas,
+  el definitivo está por decidir). Dentro de un ciclo, cada
   sensor se lee en un instante distinto y el sello de tiempo es el del
   inicio del ciclo.
 - Los dos grupos no se comunican entre sí: lo único que los relaciona es
@@ -110,12 +113,15 @@ tarea_polling (5) ──cola_lecturas (1 elemento por ciclo)──> tarea_transm
       └── tarea_pantalla (2) ──────┴── pantalla_oled ── u8g2
 ```
 
-`cola_lecturas` tiene un único consumidor. Cada elemento es un ciclo
+`cola_lecturas` tiene un único consumidor, y las tres tareas existen en
+los dos modos de funcionamiento (ver \"Ciclo y gestión de energía\"). Cada elemento es un ciclo
 completo de medida: la hora, el número `seq` y, por cada sensor, su estado
 y sus valores (o ninguno si falló). Los demás lectores usan
 `estado_sistema`, una tabla compartida protegida con mutex en la que cada
 fuente publica su último valor, su estado y cuándo funcionó por última vez,
-más un registro aparte con los datos de la red móvil.
+más un registro aparte con los datos de la red móvil. La tabla y el
+registro están en la RTC slow memory del ESP32, así que sobreviven al deep
+sleep (el mutex no: se crea en cada arranque).
 
 ### Componentes
 
@@ -128,10 +134,10 @@ más un registro aparte con los datos de la red móvil.
 | `modem` | SIM7000G por comandos AT sobre UART1: encender, apagar, comprobar la SIM, esperar el registro en la red, abrir la conexión de datos, hacer un POST HTTP (devuelve el código del servidor o en qué paso falló), leer los datos de la red (operador, tecnología, señal, IP) y obtener la hora UTC por GNSS o por CNTP. Todo lo que habla AT está aquí |
 | `i2c_bus` | Dueño único del bus I2C; cada chip registra su propio dispositivo |
 | `RTC` | Driver propio del DS3231 en tres capas, siempre en UTC |
-| `tiempo` | Decide si la hora del RTC es fiable y calcula el timestamp del país (`tiempo_ts_pais`); decide cuándo sincronizar y con qué fuente (GNSS o CNTP) y escribe el RTC (`tiempo_sincronizar`). Ver \"Hora y sincronización\" |
+| `tiempo` | Decide si la hora del RTC es fiable y calcula el timestamp del país (`tiempo_ts_pais`); decide cuándo sincronizar y con qué fuente (GNSS o CNTP) y escribe el RTC (`tiempo_sincronizar`); espera la marca de la rejilla al despertar (`tiempo_esperar_marca`) y calcula cuánto dormir (`tiempo_segundos_hasta_despertar`). Ver \"Hora y sincronización\" y \"Ciclo y gestión de energía\" |
 | `pantalla_oled` | Driver del SSD1306 sobre U8g2: callbacks de I2C y esperas, y primitivas de dibujo por líneas |
 | `u8g2` | Librería de terceros (olikraus, BSD), copiada al repo para poder compilar sin internet |
-| `estado_sistema` | Tabla de estado por fuente, con mutex, y registro de la red. Usa tipos propios: no depende de ningún driver |
+| `estado_sistema` | Tabla de estado por fuente, con mutex, y registro de la red, en RTC slow memory. Usa tipos propios: no depende de ningún driver |
 | `registro_csv` | Formato de la línea CSV y de la trama JSON, códigos de `tx` y el tipo `ciclo` que viaja por la cola. Sin hardware |
 | `tareas` | `tarea_polling` (con `tarea_polling_init`, que prepara el RS-485 y la cola antes de crear las tareas), `tarea_transmision` y `tarea_pantalla` |
 
@@ -232,8 +238,10 @@ intento por ciclo: lo que falle queda en la tarjeta con su `tx`.
 5. POST HTTP al servidor (`DOMINIO_SERVIDOR` y `RUTA_MEDIDAS` en
    `tarea_transmision.c`). Sin seguridad por ahora: HTTP sin `s` y sin clave.
 
-El módem se enciende al arrancar y **se queda encendido y registrado entre
-ciclos** (el comportamiento definitivo, con deep sleep, está pendiente).
+El módem se enciende en cada ciclo, en paralelo con la espera de la marca,
+y se apaga (`modem_apagar`) antes de dormir. Si no se pudo apagar, el nodo
+duerme igual: al despertar se pregunta con `AT` y solo se pulsa PWRKEY si no
+contesta, porque el pulso conmuta el estado.
 
 ### Valor de `tx`
 
@@ -261,15 +269,86 @@ no existe.
 ### Tiempos y consumo
 
 - Registrarse en la red puede tardar hasta 2 min después de encender el
-  módem. Sin red, los ciclos siguen guardándose en la microSD; cuando
-  vuelve la cobertura, el ciclo siguiente se envía sin reiniciar el nodo
-  (lo que falló antes queda solo en la tarjeta).
+  módem (medido: 8–38 s en GSM, y 1 de 10 sin red en 120 s). Sin red, los
+  ciclos siguen guardándose en la microSD; cuando vuelve la cobertura, el
+  ciclo siguiente se envía sin reiniciar el nodo (lo que falló antes queda
+  solo en la tarjeta).
 - Donde no hay LTE-M, el módem usa GSM/GPRS: un envío tarda 2–3 s, pero
   pide picos de 2 A (0,6 A en LTE-M) y con batería baja puede reiniciar
   la placa.
+- Tiempo despierto medido: ~121 s por ciclo (60 s de pantalla, 8 s de
+  apagado del módem, registro de 35–37 s, envío y SD). Los timeouts suman
+  hasta ~700 s en el peor caso teórico.
 - Mientras el nodo espera el GNSS (hasta 90 s) o un CNTP que falla (hasta
   ~52 s medidos) la transmisión se detiene y, con el muestreo de pruebas
-  de 20 s, se pueden perder ciclos por cola llena. Con 10 min no.
+  de 20 s (modo de depuración), se pueden perder ciclos por cola llena. Con
+  10 min no.
+
+## Ciclo y gestión de energía
+
+El nodo tiene dos modos, que se eligen con una sola constante en el
+firmware (`MODO_DEPURACION`):
+
+| | Modo normal (`MODO_DEPURACION` 0) | Modo de depuración |
+|---|---|---|
+| Ciclo | Uno cada `PERIODO_CICLO_S`, en los múltiplos de UTC | Uno cada `PERIODO_MUESTREO_MS` (20 s) desde el arranque, sin rejilla |
+| Módem y pantalla | Se apagan al final del ciclo | Siempre encendidos |
+| Deep sleep | Sí, entre ciclos | Nunca duerme |
+
+**Antes de llevar un nodo al campo, comprobar que `MODO_DEPURACION` está a 0.**
+El modo solo se indica en el log de arranque, no en pantalla: un nodo en
+modo de depuración no se distingue en campo sin ordenador y no duerme
+nunca.
+
+### Ciclo en modo normal
+
+1. El ESP32 despierta por su temporizador 15 s antes de la marca
+   (`MARGEN_DESPERTAR_S`). Un despertar de deep sleep es un reset: el
+   firmware arranca de nuevo, y solo se conserva la RTC slow memory.
+2. Se enciende el módem y mientras se registra se espera la marca,
+   sondeando el DS3231 cada 10 ms. La medida se toma en ese segundo exacto.
+3. Se sincroniza la hora si toca, se envía, se guarda la línea en la
+   microSD con su `tx` y se apaga el módem.
+4. La pantalla sigue 60 s encendida para ver los errores y después se
+   apaga el OLED.
+5. Se calcula la siguiente marca (lo último del ciclo, después de cualquier
+   escritura en el DS3231) y se duerme hasta 15 s antes de ella.
+
+La marca es el instante UTC, múltiplo del periodo, en que se mide; el
+despertar es la marca menos el margen. El periodo tiene que dividir 3600 s
+para que las marcas caigan siempre en minutos redondos de la hora local
+(Perú es UTC−5, múltiplo de 3600 s).
+
+### Qué hace el nodo en cada situación
+
+| Situación | Qué pasa |
+|---|---|
+| Arranque en frío (grabación, alimentación, RST, caída de tensión, abrir el monitor) | Ciclo inmediato, fuera de rejilla, para que haya datos en pantalla al instalar. Después, a la rejilla |
+| Despertar normal | Espera la marca y mide en el segundo exacto |
+| Despertar tarde (el DS3231 ya pasó la marca) | Mide al instante y anota el retraso en el log. La rejilla se mantiene |
+| Ciclo más largo que el periodo | Se salta la marca: duerme hasta la primera marca posterior. Se pierde esa medida, la rejilla no |
+| Sin hora válida al final del ciclo (GNSS y CNTP fallaron) | Duerme un periodo completo, sin rejilla. Regla solo del gateway; los datos se guardan igual en `_SINHORA.csv` con `ts` = 0 |
+| El módem no se registra | Se duerme igual; el ciclo queda en la microSD con `tx` 2 |
+
+### Pantalla tras despertar
+
+`tabla` y `registro_red` están en RTC slow memory: al despertar se ve el
+ciclo anterior con su hora (`ENVÍO OK hh:mm`, `SD OK, guardado hh:mm`,
+`!hh:mm` en un sensor), no `SIN DATOS`. Tras un arranque en frío (la
+memoria vuelve a 0) salen `!--:--`, `SD SIN DATOS` y `RED SIN DATOS` hasta
+que el primer ciclo publica. Abrir `idf.py monitor` reinicia la placa y
+borra ese estado; con `idf.py -p COMx monitor --no-reset` se ve el log
+sin reiniciarla.
+
+### Datos medidos
+
+- La rejilla cae en el segundo exacto: tres despertares seguidos con `ts`
+  en :x0:00.
+- El oscilador RC con el que el ESP32 cuenta el sueño **adelanta ~1 %**
+  (medido con sueños de 4–8 min, una placa, en banco). Con 600 s, el margen
+  de 15 s cubre un 2,5 %. Con un periodo de 1 h cubriría un 0,42 %: hay que
+  revisar el margen cuando se fije el periodo.
+- Memoria RTC usada: 836 B de 8 KB.
 
 ## Conectar la placa al ordenador (una vez por PC)
 
@@ -469,9 +548,10 @@ en el acuse de recibo de cada envío por LoRa, y la corrección se aplica al
 ciclo siguiente. Si el acuse no llega, el nodo mide igual y sigue con su
 DS3231.
 
-Los ciclos de todos los nodos empiezan en múltiplos de 10 min de UTC
-(rejilla común): el nodo despierta antes, espera a ese segundo en su
-DS3231 y entonces mide. Así el sello de tiempo de un mismo ciclo coincide
+Los ciclos de todos los nodos empiezan en múltiplos del periodo de UTC
+(rejilla común, ya implementada en el gateway; ver \"Ciclo y gestión de
+energía\"): el nodo despierta antes, espera a ese segundo en su DS3231 y
+entonces mide. Así el sello de tiempo de un mismo ciclo coincide
 entre nodos aunque sus relojes tengan diferencias de menos de un segundo.
 
 No se fija una cota numérica de error, ni entre nodos ni frente a UTC: se
@@ -535,9 +615,13 @@ no escribe nada en el RTC al arrancar, las medidas salen con `rtc` = 9 y
   desviación puede llegar a 3 s. Error aceptado por diseño, también para
   el despliegue con varios nodos: los sensores de un ciclo se leen en
   instantes distintos y el sello es el del inicio del ciclo.
-- Los ciclos todavía no empiezan en una rejilla UTC común: el periodo se
-  cuenta desde el arranque del nodo. La rejilla llega con la gestión de
-  energía (deep sleep).
+- El periodo definitivo no está decidido (menor de 1 h; hoy 600 s en las
+  pruebas). Con periodos largos, el margen de despertar de 15 s puede
+  quedarse corto por la deriva del oscilador RC (ver \"Ciclo y gestión de
+  energía\").
+- Deep sleep validado en banco, alimentado por USB. Sin medir: consumo
+  dormido, presupuesto solar y los sensores tras despertar (NPK y pH no
+  estaban conectados).
 - La hora tiene resolución de 1 s. Con GNSS el error frente a UTC es de
   decenas de ms más el retardo del aviso del módem (sin medir); con CNTP
   solo, la hora llega atrasada entre 0,3 y 1,3 s.
@@ -545,12 +629,14 @@ no escribe nada en el RTC al arrancar, las medidas salen con `rtc` = 9 y
   cualquier corte de alimentación antes de dar medidas fiables.
 - El NPK tarda hasta 10 s en estabilizarse al alimentarlo: la primera
   lectura después de conectarlo no es fiable.
-- Transmisión: sin seguridad (HTTP sin clave ni cifrado), el módem se
-  queda encendido entre ciclos y el reenvío de lo que falle no está hecho.
+- Transmisión: sin seguridad (HTTP sin clave ni cifrado) y el reenvío de
+  lo que falle no está hecho.
 - El módem se registra en GSM donde no hay LTE-M (todos los sitios
   probados), con picos de 2 A.
 - Si el módem deja de contestar, el nodo sigue midiendo y guardando en la
-  microSD (`MODEM NO CONTESTA` en pantalla), pero no lo vuelve a encender
-  hasta que se reinicie.
+  microSD (`MODEM NO CONTESTA` en pantalla) y lo vuelve a intentar en el
+  ciclo siguiente. Visto dos veces un cuelgue en `AT+SHCONN` (70 s) sin
+  causa determinada: `modem_apagar` no distingue un módem apagado de uno
+  colgado, así que el pulso de encendido siguiente podría apagarlo.
 - El desfase horario es fijo: el nodo no sirve tal cual en países con
   horario de verano (ver \"Desplegar en otro país\").

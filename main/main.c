@@ -9,6 +9,9 @@
 #include "freertos/task.h"
 #include "esp_err.h"
 #include "esp_log.h"
+#include "esp_sleep.h"
+#include "stdbool.h"
+#include "esp_bit_defs.h"
 
 #include "modbus.h"
 #include "tarea_polling.h"
@@ -78,6 +81,29 @@ static const char *TAG = "main";
 
 void app_main(void)
 {
+    uint32_t causas_despertar; 
+    bool despertar; 
+
+    causas_despertar = esp_sleep_get_wakeup_causes(); 
+    // Comprueba el mapa de bits, y pone true si ha sido el timer de esp
+    despertar = (causas_despertar & BIT(ESP_SLEEP_WAKEUP_TIMER)) != 0;
+
+    if (MODO_DEPURACION)
+    {
+        ESP_LOGI(TAG, "modo depuración");
+    }else 
+    {
+        ESP_LOGI(TAG, "modo deep_sleep"); 
+    }
+
+    if (despertar)
+    {
+        ESP_LOGI(TAG, "arranque: despertar por temporizador (causas 0x%08lX)", (unsigned long)causas_despertar);
+    } else 
+    {
+        ESP_LOGI(TAG, "arranque: en frio (causas 0x%08lX)", (unsigned long)causas_despertar); 
+    }
+
     ESP_ERROR_CHECK(tarea_polling_init());
 
     esp_err_t err_sistema = estado_sistema_init();

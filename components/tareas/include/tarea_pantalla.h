@@ -15,4 +15,7 @@
  */
 void tarea_pantalla(void *parametros);
 
+void tarea_pantalla_detener(void); 
+
+
 #endif

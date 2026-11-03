@@ -20,4 +20,8 @@ tiempo_estado_t tiempo_ts_pais(uint32_t *ts_pais);
 
 void tiempo_sincronizar(const char *apn, const char *usuario, const char *clave);
 
+void tiempo_esperar_marca(void); 
+
+uint32_t tiempo_segundos_hasta_despertar(void);
+
 #endif

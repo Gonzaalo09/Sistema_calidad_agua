@@ -1,5 +1,5 @@
 /*
- * Estado del nodo: tabla en RAM por fuente (RTC, pantalla, red, SD, sensores) y registro de red, tras un mutex.
+ * Estado del nodo: tabla en RTC slow memory por fuente (RTC, pantalla, red, SD, sensores) y registro de red, tras un mutex.
  * Módulo pasivo: no es una tarea ni toca hardware. Fuente: ESP-IDF v6.1, FreeRTOS (mutex con herencia de prioridad).
  */
 #include <string.h>
@@ -11,14 +11,16 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "esp_log.h"
+#include "esp_attr.h"
 
 #include "sensores.h"
 #include "estado_sistema.h"
 
 static const char *TAG = "estado_sistema";
 
-static estado_fuente_t tabla[NUM_FUENTES];  // indexada por FUENTE_*
-static registro_red_t registro_red;
+// Se pone RTC_DATA_ATTR para que se mantenga en la memoria del RTC y lo puedas recuperar después del deep_sleep
+static RTC_DATA_ATTR estado_fuente_t tabla[NUM_FUENTES];  // indexada por FUENTE_*
+static RTC_DATA_ATTR registro_red_t registro_red;
 static SemaphoreHandle_t mutex = NULL;      // mutex y no semáforo binario: la herencia de prioridad evita que polling espere tras una tarea media
 static const uint32_t MUTEX_TIMEOUT_MS = 100; // ms; criterio propio
 
@@ -37,9 +39,11 @@ esp_err_t estado_sistema_init(void)
         return ESP_ERR_NO_MEM;
     }
 
-    memset(tabla, 0, sizeof(tabla));
-    memset(&registro_red, 0, sizeof(registro_red));
-
+    for (int i = FUENTE_SENSOR_BASE; i < NUM_FUENTES; i++)
+    {
+        tabla[i].codigo = ESTADO_SIN_DATOS;
+    }
+    
     tabla[FUENTE_RTC].nombre = "RTC";
     tabla[FUENTE_PANTALLA].nombre = "Pantalla";
     tabla[FUENTE_RED].nombre = "Red";

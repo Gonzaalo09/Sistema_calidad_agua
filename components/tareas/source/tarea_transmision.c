@@ -11,6 +11,7 @@
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "esp_log.h"
+#include "esp_sleep.h"
 
 #include "sensores.h"
 #include "tarea_polling.h"
@@ -20,6 +21,7 @@
 #include "registro_csv.h"
 #include "modem.h"
 #include "tiempo.h"
+#include "tarea_pantalla.h"
 
 #define MAX_ARCHIVOS_DIA 9 // archivos del dia: base, _2 .. _9 si cambian los sensores el mismo dia; criterio propio
 
@@ -30,6 +32,8 @@
 // Servidor de pruebas del compañero: HTTP sin 's' (decidido: primero solo se comprueba la conexión)
 #define DOMINIO_SERVIDOR "http://yago.alwaysdata.net"
 #define RUTA_MEDIDAS "/plataforma/api/v1/medidas"
+#define PANTALLA_ENCENDIDA_S 60 // El tiempo que va a estar encendida después de la tx para ver los datos
+#define SUENO_PRUEBA_S 30 // Tiempo que se duerma de prueba
 
 static const char *TAG = "transmision";
 
@@ -355,6 +359,29 @@ static void bringup_modem(void)
     // El modem se queda encendido entre ciclos (decision del 01/10/2026, para las pruebas)
 }
 
+static void secuencia_final(void)
+{
+    modem_estado_t modem_est; 
+
+    modem_est = modem_apagar(); 
+    ESP_LOGI(TAG, "modem_apagar: est %d", modem_est); 
+    if (modem_est != MODEM_OK)
+    {
+        ESP_LOGW(TAG, "el modem no confirma el apagado: se duerme igualmente"); 
+    }
+
+    ESP_LOGI(TAG, "pantalla encendida %d s", PANTALLA_ENCENDIDA_S);
+    vTaskDelay(pdMS_TO_TICKS(PANTALLA_ENCENDIDA_S * 1000));
+    tarea_pantalla_detener(); 
+
+    uint32_t sueno_s = tiempo_segundos_hasta_despertar(); // Después de cualquier escritura en el RTC, es lo último de todo
+    ESP_ERROR_CHECK(esp_sleep_enable_timer_wakeup((uint64_t)sueno_s * 1000000ULL));
+
+    // PRUEBA
+    // ESP_ERROR_CHECK(esp_sleep_enable_timer_wakeup((uint64_t)SUENO_PRUEBA_S * 1000000ULL));
+    esp_deep_sleep_start();
+}
+
 void tarea_transmision(void *parametros)
 {
     // static: fuera de la pila de la tarea
@@ -370,7 +397,7 @@ void tarea_transmision(void *parametros)
     }
 
     bringup_modem();
-    while (1)
+    do 
     {
         xQueueReceive(get_cola_lecturas(), &lectura, portMAX_DELAY);
 
@@ -394,7 +421,18 @@ void tarea_transmision(void *parametros)
             sd_estado_t est = guardar_en_sd(&lectura, cabecera, tx);
             publicar_sd(est, lectura.ts);
         }
+        /** Prueba de apagado y encendido del modem(cambiar en tarea_polling.h el PERIODO_MUESTREO_MS A 120000 )
+        uint32_t t0 = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
+        modem_estado_t modem_est_apagado = modem_apagar();
+        ESP_LOGI(TAG, "modem_apagar: est %d en %lu ms", modem_est_apagado, (unsigned long)((uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS) - t0));
+
+        t0 = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
+        bringup_modem();
+        ESP_LOGI(TAG, "bringup tras apagado: %lu ms", (unsigned long)((uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS) - t0));
+         */
+
         // Andamiaje: pila libre mínima en bytes (ESP-IDF); criterio: subir la pila si baja de 1 KB
         ESP_LOGI(TAG, "pila libre minima: %u B", (unsigned)uxTaskGetStackHighWaterMark(NULL));
-    }
+    }while(MODO_DEPURACION);
+    secuencia_final(); 
 }

@@ -49,4 +49,7 @@ void pantalla_oled_texto(uint8_t linea, const char *texto);
 /** @brief Envía el buffer a la pantalla. No hace nada si el frame ya ha fallado. */
 void pantalla_oled_mostrar(void);
 
+/** @brief Apaga la pantalla para cuando se ponga en deep_sleep */
+void pantalla_oled_apagar(void);
+
 #endif

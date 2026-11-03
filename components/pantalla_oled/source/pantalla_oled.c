@@ -247,3 +247,12 @@ void pantalla_oled_mostrar(void)
     }
     u8g2_SendBuffer(&u8g2);
 }
+
+void pantalla_oled_apagar(void)
+{
+    if (oled_dev == NULL) // Por si hay un fallo 
+    {
+        return; 
+    }
+    u8g2_SetPowerSave(&u8g2, 1); // 1 = display off
+}
