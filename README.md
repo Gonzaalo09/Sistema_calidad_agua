@@ -196,6 +196,13 @@ Cada línea es un ciclo de medida. Columnas, en orden:
 | `<sensor>_est` | Código de estado del sensor, y a continuación una columna por magnitud (`NPK_Nitrogeno`…). Si el sensor falló, sus valores quedan vacíos |
 | `tx` | Resultado del envío de ese ciclo: código HTTP del servidor (`200` = guardado) o un código propio del nodo menor que 100. Ver \"Transmisión de datos\" |
 
+**`ts` no siempre cae en la rejilla.** Lo normal es :00, :10, :20…, pero
+hay tres excepciones: el primer ciclo tras encender o reiniciar el nodo
+(hora cualquiera), un despertar tarde (unos segundos después de la marca) y
+un ciclo sin hora válida (`ts` = 0). Si el nodo se salta una marca porque
+el ciclo anterior duró demasiado, falta esa medida pero `seq` no deja
+hueco: `seq` cuenta medidas, no marcas.
+
 Abrir en Excel: **Datos → Desde texto/CSV**, delimitador **punto y coma**.
 Los decimales van con **punto**: si Excel está en español y convierte
 `17.298` en `17298` o lo deja como texto, hay que indicar el punto como
@@ -287,7 +294,7 @@ no existe.
 ## Ciclo y gestión de energía
 
 El nodo tiene dos modos, que se eligen con una sola constante en el
-firmware (`MODO_DEPURACION`):
+firmware (`MODO_DEPURACION`, en `tarea_polling.h`):
 
 | | Modo normal (`MODO_DEPURACION` 0) | Modo de depuración |
 |---|---|---|
@@ -345,10 +352,37 @@ sin reiniciarla.
 - La rejilla cae en el segundo exacto: tres despertares seguidos con `ts`
   en :x0:00.
 - El oscilador RC con el que el ESP32 cuenta el sueño **adelanta ~1 %**
-  (medido con sueños de 4–8 min, una placa, en banco). Con 600 s, el margen
+  (medido con sueños de 4–9 min, una placa, en banco). Con 600 s, el margen
   de 15 s cubre un 2,5 %. Con un periodo de 1 h cubriría un 0,42 %: hay que
   revisar el margen cuando se fije el periodo.
 - Memoria RTC usada: 836 B de 8 KB.
+
+### Leer el log de un ciclo
+
+| Línea | Qué significa |
+|---|---|
+| `arranque: en frio (causas 0x00000001)` | Encendido, grabación, RST o caída de tensión |
+| `arranque: despertar por temporizador (causas 0x00000010)` | Despertar normal (el bootloader muestra antes `rst:0x5 (DEEPSLEEP_RESET)`) |
+| `Sin marca: ciclo inmediato` | No hay marca guardada (arranque en frío o ciclo anterior sin hora): mide ya |
+| `marca …, faltan N s` y `marca alcanzada a los N ms del arranque` | Espera normal. Cuanto más pase N de 15 000 ms, antes despertó el ESP32 (deriva del RC) |
+| `despertar tarde: N s despues de la marca` | La deriva superó el margen de 15 s: mide ya |
+| `ciclo largo: se saltan N marcas` | El ciclo duró más que el periodo |
+| `hora no valida: sueño de un periodo, sin rejilla` | Sin hora fiable al terminar: el siguiente ciclo será `Sin marca` |
+| `proxima marca M, duermo N s` | Última línea antes de dormir. `M` es la marca en segundos UTC |
+
+### Probar los casos límite
+
+En `tiempo.c` hay una copia comentada de `tiempo_segundos_hasta_despertar`
+con código de prueba. Para usarla: comentar la función normal, descomentar
+la de prueba y `#define PRUEBA_CASO n`, y poner `PERIODO_CICLO_S` en 300
+para no esperar tanto. Hace falta un arranque en frío y al menos dos
+despertares. Al terminar, dejarlo todo como estaba.
+
+| `PRUEBA_CASO` | Qué provoca | Qué debe salir en el log |
+|---|---|---|
+| 1 | Alarga un periodo el ciclo (solo tras un despertar) | `ciclo largo: se saltan 1 marcas` |
+| 2 | Duerme 30 s de más | En el despertar siguiente, `despertar tarde: ~15 s` |
+| 3 | Simula que no hay hora válida | En el despertar siguiente, `Sin marca: ciclo inmediato` |
 
 ## Conectar la placa al ordenador (una vez por PC)
 

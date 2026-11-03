@@ -26,8 +26,8 @@
 #define SEGUNDOS_POR_PAGINA 5 // repintados (= segundos con REFRESCO_MS 1000) antes de cambiar de página; criterio propio
 #define NUM_PAGINAS 2         // página 0: sensores; página 1: red + SD
 #define TAM_TEXTO_ENVIO 18    // 17 caracteres como maximo + '\0': con " !hh:mm" caben las 25 columnas
-#define PANTALLA_ESPERA_PARO_MS 2000
-#define PANTALLA_SONDEO_PARO_MS 50 
+#define PANTALLA_ESPERA_PARO_MS 2000 // ms; tope de espera a que tarea_pantalla pare. Cubre un repintado (REFRESCO_MS + ~107 ms del frame); criterio propio
+#define PANTALLA_SONDEO_PARO_MS 50 // ms entre comprobaciones de parada_hecha; criterio propio
 
 static const char *TAG = "tarea_pantalla";
 

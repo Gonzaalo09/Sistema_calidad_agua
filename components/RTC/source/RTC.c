@@ -59,7 +59,7 @@ static uint8_t es_bisiesto(uint16_t anio)
 /** @brief Días del mes (1..12) en ese año completo; 0 si el mes no es válido. */
 static uint8_t dias_del_mes(uint16_t anio, uint8_t mes)
 {
-    static const uint8_t tabla[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    static const uint8_t tabla[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}; // de enero a diciembre; febrero bisiesto se trata aparte
     if (mes < 1 || mes > 12)
     {
         return 0;

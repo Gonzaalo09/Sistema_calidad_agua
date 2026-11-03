@@ -24,9 +24,9 @@
 
 #define PERIODO_CICLO_S 600 // Periodo en el que se despertará 
 #define MARGEN_DESPERTAR_S 15  // Margen que le damos por la deriva del reloj del esp
-#define SONDEO_MARCA_MS 10
+#define SONDEO_MARCA_MS 10 // ms entre lecturas del DS3231 esperando la marca; provisional: basta con <= 1 s de exactitud y cada lectura cuesta ~1 ms
 
-// Para prueba de casos distintos: 0 = normal; 1 = ciclo largo; 2 = despertar tarde; 3 = hora no valida. Borrar tras la prueba
+// Para prueba de casos distintos: 0 = normal; 1 = ciclo largo; 2 = despertar tarde; 3 = hora no valida. La usa la copia de prueba comentada de tiempo_segundos_hasta_despertar
 // #define PRUEBA_CASO 2
 
 static RTC_DATA_ATTR uint32_t marca_objetivo; // UTC en s; 0 = sin rejilla, en RTC slow porque tiene que sobrevivir el deep_sleep. Guarda siempre la marca sin el margen 
@@ -249,7 +249,7 @@ void tiempo_esperar_marca(void)
         return;
     }
 
-    // Despertar tarde (opción A): la deriva superó el margen; se mide ya, sin saltar a la siguiente marca
+    // Despertar tarde: la deriva superó el margen; se mide ya, sin saltar a la siguiente marca
     if (ahora >= marca_objetivo)
     {
         ESP_LOGW(TAG, "despertar tarde: %lu s despues de la marca", ahora - marca_objetivo);
@@ -272,17 +272,19 @@ void tiempo_esperar_marca(void)
 // ESTO ES EL AUTENTICO EL QUE FUNCIONA 
 uint32_t tiempo_segundos_hasta_despertar(void)
 {
-    uint32_t ahora; 
+    uint32_t ahora;
     uint32_t marca;
 
     if (leer_rtc(&ahora) != TIEMPO_OK)
     {
+        // Solo vale para el gateway: un nodo sin SIM despertaría siempre fuera de la ventana de su padre
         marca_objetivo = 0;
-        ESP_LOGW(TAG, "hora no valida: sueño de un periodo, sin rejilla"); 
+        ESP_LOGW(TAG, "hora no valida: sueño de un periodo, sin rejilla");
         return PERIODO_CICLO_S;
     }
 
-    marca = ((ahora + MARGEN_DESPERTAR_S) / PERIODO_CICLO_S + 1) * PERIODO_CICLO_S; 
+    // Se suma el margen antes de dividir: una marca a menos de MARGEN_DESPERTAR_S de ahora ya no da tiempo a despertar antes de ella
+    marca = ((ahora + MARGEN_DESPERTAR_S) / PERIODO_CICLO_S + 1) * PERIODO_CICLO_S;
 
     if (marca_objetivo != 0 && (marca > (marca_objetivo + PERIODO_CICLO_S)))
     {

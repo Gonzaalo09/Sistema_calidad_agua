@@ -45,9 +45,9 @@ typedef struct ciclo_sensor
 /** @brief Una vuelta de tarea_polling: hora, número de ciclo y todos los sensores. Es el elemento de cola_lecturas. */
 typedef struct ciclo
 {
-    uint32_t ts;                // segundos, UTC + OFFSET_PAIS_S; 0 si el RTC falló. Marca el inicio del ciclo
+    uint32_t ts;                // segundos, UTC + OFFSET_PAIS_S; 0 sin hora fiable. Marca el inicio del ciclo
     uint32_t seq;               // de config_nodo_siguiente_seq; 0 = sin número
-    estado_codigo_t estado_rtc; // OK o SIN_HORA
+    estado_codigo_t estado_rtc; // ESTADO_OK, ESTADO_SIN_HORA, ESTADO_HORA_NO_VALIDA o ESTADO_HORA_CADUCADA
     uint8_t num_sensores;       // NUM_SENSORES en este ciclo
     ciclo_sensor sensor[MAX_SENSORES]; // la posición i corresponde a TABLA_SENSORES[i]
 } ciclo;

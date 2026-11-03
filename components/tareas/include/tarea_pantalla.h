@@ -15,7 +15,13 @@
  */
 void tarea_pantalla(void *parametros);
 
-void tarea_pantalla_detener(void); 
+/**
+ * @brief Pide a tarea_pantalla que apague la OLED y se borre, y espera a que lo haga, como mucho PANTALLA_ESPERA_PARO_MS.
+ *
+ * Lo apaga la propia tarea, para no usar u8g2 desde dos tareas a la vez; mira la petición una vez por repintado.
+ * Si no para a tiempo solo queda un log y el llamante sigue.
+ */
+void tarea_pantalla_detener(void);
 
 
 #endif

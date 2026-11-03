@@ -111,7 +111,7 @@ modem_estado_t modem_apagar(void);
 /**
  * @brief Activa la conexión de datos (AT+CNCFG + AT+CNACT) y espera a que tenga IP.
  *
- * No hace nada si ya está activa (el módem sigue encendido entre ciclos).
+ * No hace nada si ya está activa (se llama al encender el módem y otra vez en cada envío).
  *
  * @return MODEM_OK, MODEM_ERROR (puntero nulo, comando truncado o rechazado) o MODEM_TIMEOUT
  *         (sin respuesta, o sin IP en MODEM_TIMEOUT_CNACT_MS).

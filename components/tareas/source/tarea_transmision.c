@@ -33,7 +33,7 @@
 #define DOMINIO_SERVIDOR "http://yago.alwaysdata.net"
 #define RUTA_MEDIDAS "/plataforma/api/v1/medidas"
 #define PANTALLA_ENCENDIDA_S 60 // El tiempo que va a estar encendida después de la tx para ver los datos
-#define SUENO_PRUEBA_S 30 // Tiempo que se duerma de prueba
+// #define SUENO_PRUEBA_S 30       // Tiempo que se duerma de prueba
 
 static const char *TAG = "transmision";
 
@@ -68,11 +68,17 @@ static estado_codigo_t sd_a_estado(sd_estado_t est)
  */
 static void imprimir_ciclo(const ciclo *lectura)
 {
-    if (lectura->ts == 0)
+    if (lectura->estado_rtc == ESTADO_SIN_HORA)
     {
-        printf("--- %s seq %lu @ SIN HORA (RTC no disponible) ---\n",
+        printf("--- %s seq %lu @ SIN HORA (RTC no contesta) ---\n",
                config_nodo_id(), (unsigned long)lectura->seq);
     }
+    else if (lectura->estado_rtc == ESTADO_HORA_NO_VALIDA)
+    {
+        printf("--- %s seq %lu @ SIN HORA (esperando hora) ---\n",
+               config_nodo_id(), (unsigned long)lectura->seq);
+    }
+
     else
     {
         time_t t = (time_t)lectura->ts;
@@ -356,23 +362,29 @@ static void bringup_modem(void)
         ESP_LOGW(TAG, "SIM no lista: no se intenta el registro");
     }
 
-    // El modem se queda encendido entre ciclos (decision del 01/10/2026, para las pruebas)
+    // El modem se queda encendido: en modo de depuración, entre ciclos; en deep sleep, hasta secuencia_final
 }
 
+/**
+ * @brief Cierre del ciclo en modo deep sleep: apaga el módem, deja la pantalla PANTALLA_ENCENDIDA_S, la apaga y duerme hasta la siguiente marca.
+ *
+ * No vuelve: esp_deep_sleep_start no retorna y al despertar app_main empieza de cero. Si el módem no confirma el
+ * apagado se duerme igual: al despertar, modem_encender pregunta con AT y solo pulsa PWRKEY si no contesta.
+ */
 static void secuencia_final(void)
 {
-    modem_estado_t modem_est; 
+    modem_estado_t modem_est;
 
-    modem_est = modem_apagar(); 
-    ESP_LOGI(TAG, "modem_apagar: est %d", modem_est); 
+    modem_est = modem_apagar();
+    ESP_LOGI(TAG, "modem_apagar: est %d", modem_est);
     if (modem_est != MODEM_OK)
     {
-        ESP_LOGW(TAG, "el modem no confirma el apagado: se duerme igualmente"); 
+        ESP_LOGW(TAG, "el modem no confirma el apagado: se duerme igualmente");
     }
 
     ESP_LOGI(TAG, "pantalla encendida %d s", PANTALLA_ENCENDIDA_S);
     vTaskDelay(pdMS_TO_TICKS(PANTALLA_ENCENDIDA_S * 1000));
-    tarea_pantalla_detener(); 
+    tarea_pantalla_detener();
 
     uint32_t sueno_s = tiempo_segundos_hasta_despertar(); // Después de cualquier escritura en el RTC, es lo último de todo
     ESP_ERROR_CHECK(esp_sleep_enable_timer_wakeup((uint64_t)sueno_s * 1000000ULL));
@@ -397,7 +409,7 @@ void tarea_transmision(void *parametros)
     }
 
     bringup_modem();
-    do 
+    do
     {
         xQueueReceive(get_cola_lecturas(), &lectura, portMAX_DELAY);
 
@@ -433,6 +445,6 @@ void tarea_transmision(void *parametros)
 
         // Andamiaje: pila libre mínima en bytes (ESP-IDF); criterio: subir la pila si baja de 1 KB
         ESP_LOGI(TAG, "pila libre minima: %u B", (unsigned)uxTaskGetStackHighWaterMark(NULL));
-    }while(MODO_DEPURACION);
-    secuencia_final(); 
+    } while (MODO_DEPURACION);
+    secuencia_final();
 }

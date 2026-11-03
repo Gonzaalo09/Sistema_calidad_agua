@@ -33,7 +33,7 @@
 #define STAT_REG_ROAMING 5 // Registrado en otra red (roaming)
 
 #define SAPBR_CONECTADO 1 // Respuesta de SAPBR cuando esta conectado
-#define CNTP_OK 1
+#define CNTP_OK 1 // Código de +CNTP cuando trae la hora
 
 static const char *TAG = "modem";
 
@@ -379,7 +379,7 @@ modem_estado_t modem_abrir_datos(const char *apn, const char *usuario, const cha
         return MODEM_ERROR;
     }
 
-    // ¿ya está activa? (el módem sigue encendido entre ciclos). Respuesta: +CNACT: 1,"10.20.30.40"; <status> = 1 es activa (5.2.30)
+    // ¿ya está activa? (se llama al encender el módem y otra vez en cada envío). Respuesta: +CNACT: 1,"10.20.30.40"; <status> = 1 es activa (5.2.30)
     if ((consultar("AT+CNACT?", "+CNACT:", &d, true) == MODEM_OK) && (sscanf(d, "%d", &estado) == 1) && (estado == CNACT_ACTIVA))
     {
         return MODEM_OK;

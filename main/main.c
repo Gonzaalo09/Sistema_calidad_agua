@@ -123,7 +123,7 @@ void app_main(void)
     if (err_bus != ESP_OK)
     {
         ESP_LOGE(TAG, "Fallo creando el bus I2C, RTC y pantalla no disponibles");
-        estado_sistema_publicar(FUENTE_RTC, NULL, 0, 0, ESTADO_SIN_RESPUESTA);
+        estado_sistema_publicar(FUENTE_RTC, NULL, 0, 0, ESTADO_SIN_HORA);
         estado_sistema_publicar(FUENTE_PANTALLA, NULL, 0, 0, ESTADO_SIN_RESPUESTA);
     }
     else
@@ -134,7 +134,7 @@ void app_main(void)
         if (err_rtc != ESP_OK)
         {
             ESP_LOGW(TAG, "RTC no disponible al arrancar");
-            estado_sistema_publicar(FUENTE_RTC, NULL, 0, 0, ESTADO_SIN_RESPUESTA);
+            estado_sistema_publicar(FUENTE_RTC, NULL, 0, 0, ESTADO_SIN_HORA);
         }
         else
         {
@@ -221,7 +221,7 @@ void app_main(void)
         ESP_LOGE(TAG, "Fallo configurando el UART1 o el PWRKEY del modem");
     }
 
-    // Prioridades: el muestreo (5) no debe esperar al módem (3); RTC y pantalla (2) son de apoyo.
+    // Prioridades: el muestreo (5) no debe esperar al módem (3); la pantalla (2) es de apoyo.
     // Pila libre mínima medida con 6144 B en transmisión: ~3300 B (AC3D04). Criterio: subir si baja de 1 KB.
     xTaskCreate(tarea_polling, "polling", 4096, NULL, 5, NULL);
     xTaskCreate(tarea_transmision, "transmision", 6144, NULL, 3, NULL);

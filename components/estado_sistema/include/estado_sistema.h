@@ -28,7 +28,7 @@ typedef enum
     ESTADO_OK,
     ESTADO_SIN_RESPUESTA,      // Timeout: no contesta nada
     ESTADO_TRAMA_INVALIDA,     // contesto, CRC o longitud mal
-    ESTADO_SIN_HORA,           // el RTC no responde, o se puso una hora provisional al arrancar
+    ESTADO_SIN_HORA,           // el RTC no responde
     ESTADO_SD_AUSENTE,         // La SD no responde (no está o mal contacto)
     ESTADO_SD_SIN_FORMATO,     // responde, pero no se puede montar (sin formato, exFAT o dañada)
     ESTADO_SD_LLENA,           // SD está llena
@@ -74,7 +74,7 @@ typedef struct registro_red_t
 
 /**
  * @brief Crea el mutex y como la tabla y el registro viven en el RTC slow memory
- * sobreviven el deep_sleep, en cada arranque solo se reinician los codigos y hay_datos. Llamar en app_main antes de crear tareas.
+ * sobreviven el deep_sleep, en cada arranque solo se reinician los codigos de los sensores. Llamar en app_main antes de crear tareas.
  * @return ESP_OK (también si ya estaba inicializado) o ESP_ERR_NO_MEM si no se pudo crear el mutex.
  */
 esp_err_t estado_sistema_init(void);
