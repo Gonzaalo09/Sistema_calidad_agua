@@ -9,6 +9,8 @@
 #define MODEM_PIN_TX 27    // GPIO de TX del ESP32 hacia el RXD del módem
 #define MODEM_PIN_RX 26    // GPIO de RX del ESP32 desde el TXD del módem
 #define MODEM_PIN_PWRKEY 4 // GPIO que activa PWRKEY a través de Q4: alto = PWRKEY a GND
+#define MODEM_PIN_FLIGHT 25 // GPIO de FLIGHTMODE a través de U5: bajo = modo avión (HD V1.00, "Flight Mode Control")
+#define MODEM_PIN_STATUS 34 // GPIO de STATUS a través de U5: alto = módem encendido y listo (HD V1.00, 3.2.2); solo entrada
 
 // Configuración de la UART (115200 8N1, sin control de flujo)
 #define MODEM_BAUDIOS 115200 // baudios; el autobaud admite 9600-115200, se conecta a 115200 automaticamente
@@ -17,21 +19,20 @@
 #define MODEM_UART_RX_BUF_SIZE 1024 // bytes; uart_driver_install exige más de 128. Margen para respuestas largas
 #define MODEM_TAM_RESPUESTA 256     // bytes; margen holgado para respuestas extensas como AT+CGMR o AT+CPSI?
 
-// Tiempos de Secuencia de Encendido (HD tabla 8)
-#define MODEM_PULSO_ENCENDIDO_MS 1100 // ms; Ton >= 1 s + 10 % de margen
-#define MODEM_ESPERA_UART_MS 4600     // ms; Ton(uart) >= 4,5 s + 100 ms (inicio del sondeo)
+// Tiempos de Secuencia de Encendido (SIM7600G Hardware Design V1.00, 3.2.1)
+#define MODEM_PULSO_ENCENDIDO_MS 500 // ms; Ton típico 500 ms, por debajo del Toff típico de 2,5 s
+#define MODEM_ESPERA_UART_MS 13000   // ms; Ton(uart) mínimo 13 s; los sondeos cubren el resto
 
-// Tiempos de Secuencia de Apagado (HD tabla 9)
-#define MODEM_ESPERA_APAGADO_MS 7000 // ms; Toff(uart) máx. 6,9 s (límite para recibir NORMAL POWER DOWN)
+// Tiempos de Secuencia de Apagado (SIM7600G Hardware Design V1.00, 3.2.2)
+#define MODEM_ESPERA_APAGADO_MS 15000 // ms; Toff(uart) típico 15 s, dado para PWRKEY: sin medir con AT+CPOF
 
 // Parámetros lógicos de la Máquina de Estados AT
-#define MODEM_SONDEOS_AT 10           // reintentos de "AT" para asegurar la sincronización de autobaud; criterio propio
+#define MODEM_SONDEOS_AT 30           // reintentos de "AT" para asegurar la sincronización de autobaud; criterio propio
 #define MODEM_TIMEOUT_SONDEO_MS 500   // ms esperando el OK de cada "AT"; criterio propio
 #define MODEM_TIMEOUT_COMANDO_MS 2000 // ms; timeout por defecto de los comandos sin tiempo propio; criterio propio
 
 #define MODEM_SONDEOS_ENCENDIDO 3       // sondeos antes de decidir si hay que pulsar; criterio propio
 #define MODEM_SONDEOS_APAGADO 2         // sondeos tras CPOWD; criterio propio
-#define MODEM_TIMEOUT_POWERDOWN_MS 3000 // ms de espera del URC NORMAL POWER DOWN; criterio propio (medido: llega a los 30 ms)
 
 // Registro en la red
 #define MODEM_TIMEOUT_LECTURA_MS 2000    // ms de un comando de consulta rápida (señal, operador...); criterio propio
@@ -179,5 +180,12 @@ modem_estado_t modem_portador_abrir(const char *apn, const char *usuario, const 
 modem_estado_t modem_portador_cerrar(void);
 
 modem_estado_t modem_cntp(const char *servidor, uint32_t timeout_ms, uint32_t *utc_out, int *codigo_out);
+
+/**
+ * @brief Lee el pin STATUS del módem.
+ *
+ * @return 1 (módem encendido y listo) o 0.
+ */
+int modem_leer_status(void);
 
 #endif

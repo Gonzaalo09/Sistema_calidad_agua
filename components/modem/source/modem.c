@@ -293,9 +293,17 @@ modem_estado_t modem_init(void)
         .source_clk = UART_SCLK_DEFAULT,
     };
 
-    gpio_config_t io = {
-        .pin_bit_mask = 1ULL << MODEM_PIN_PWRKEY,
+        gpio_config_t io = {
+        .pin_bit_mask = (1ULL << MODEM_PIN_PWRKEY) | (1ULL << MODEM_PIN_FLIGHT),
         .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+
+    gpio_config_t entrada = {
+        .pin_bit_mask = 1ULL << MODEM_PIN_STATUS,
+        .mode = GPIO_MODE_INPUT,
         .pull_up_en = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .intr_type = GPIO_INTR_DISABLE,
@@ -321,15 +329,27 @@ modem_estado_t modem_init(void)
         return MODEM_ERROR;
     }
 
-    // Nivel bajo antes de configurar la salida, para no dar un pulso espurio en PWRKEY (Q4 invierte: alto = pulsado)
+     // Niveles antes de configurar las salidas: sin pulso espurio en PWRKEY (Q13 invierte: alto = pulsado) y sin modo avión
     gpio_set_level(MODEM_PIN_PWRKEY, 0);
+    gpio_set_level(MODEM_PIN_FLIGHT, 1);
     err = gpio_config(&io);
     if (err != ESP_OK)
     {
         return MODEM_ERROR;
     }
 
+    err = gpio_config(&entrada);
+    if (err != ESP_OK)
+    {
+        return MODEM_ERROR;
+    }
+
     return MODEM_OK;
+}
+
+int modem_leer_status(void)
+{
+    return gpio_get_level(MODEM_PIN_STATUS);
 }
 
 modem_estado_t modem_encender(void)
@@ -930,36 +950,22 @@ modem_estado_t modem_apagar(void)
     char resp[MODEM_TAM_RESPUESTA];
     uint32_t t0 = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
     uint32_t transcurrido;
-    uint32_t resto_ms;
 
-    if (enviar_linea("AT+CPOWD=1") != MODEM_OK)
+    if (ejecutar("AT+CPOF", resp, sizeof resp, MODEM_TIMEOUT_COMANDO_MS, true) != MODEM_OK)
     {
-        return MODEM_ERROR;
+        ESP_LOGW(TAG, "sin OK de CPOF, recibido: %s", resp);
     }
 
-    // AT+CPOWD no devuelve OK: su unica respuesta es el URC NORMAL POWER DOWN
-    // (manual 5.2.1 y tabla 20.3). Por eso no se usa ejecutar().
-    if (esperar("NORMAL POWER DOWN", resp, sizeof resp, MODEM_TIMEOUT_POWERDOWN_MS, NULL) == MODEM_OK)
-    {
-        ESP_LOGI(TAG, "apagado normal en %lu ms",
-                 (unsigned long)((uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS) - t0));
-    }
-    else
-    {
-        ESP_LOGW(TAG, "sin NORMAL POWER DOWN, recibido: %s", resp);
-    }
-
-    // Toff(uart) llega a 6,9 s (HD tabla 9): se espera solo lo que falte hasta MODEM_ESPERA_APAGADO_MS
+    // Se espera solo lo que falte hasta MODEM_ESPERA_APAGADO_MS
     transcurrido = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS) - t0;
     if (transcurrido < MODEM_ESPERA_APAGADO_MS)
     {
-        resto_ms = MODEM_ESPERA_APAGADO_MS - transcurrido;
-        vTaskDelay(pdMS_TO_TICKS(resto_ms));
+        vTaskDelay(pdMS_TO_TICKS(MODEM_ESPERA_APAGADO_MS - transcurrido));
     }
 
     if (modem_sondear_at(MODEM_SONDEOS_APAGADO) == MODEM_OK)
     {
-        ESP_LOGE(TAG, "sigue contestando despues de CPOWD");
+        ESP_LOGE(TAG, "sigue contestando despues de CPOF");
         return MODEM_ERROR;
     }
 

@@ -28,6 +28,10 @@
 
 static const char *TAG = "main";
 
+#define PRUEBA_CICLOS 5
+#define PRUEBA_ENCENDIDO_MS 10000
+#define PRUEBA_TRAS_APAGAR_MS 15000
+
 // 1 = en cada arranque el RTC se pone a la hora de compilación (andamiaje). Desplegar siempre con 0. Por si acaso hay que forzarla, se hace sincronizando pero por si acaso
 // #define FORZAR_HORA 0
 
@@ -81,27 +85,29 @@ static const char *TAG = "main";
 
 void app_main(void)
 {
-    uint32_t causas_despertar; 
-    bool despertar; 
+    uint32_t causas_despertar;
+    bool despertar;
 
-    causas_despertar = esp_sleep_get_wakeup_causes(); 
+    causas_despertar = esp_sleep_get_wakeup_causes();
     // Comprueba el mapa de bits, y pone true si ha sido el timer de esp
     despertar = (causas_despertar & BIT(ESP_SLEEP_WAKEUP_TIMER)) != 0;
 
     if (MODO_DEPURACION)
     {
         ESP_LOGI(TAG, "modo depuración");
-    }else 
+    }
+    else
     {
-        ESP_LOGI(TAG, "modo deep_sleep"); 
+        ESP_LOGI(TAG, "modo deep_sleep");
     }
 
     if (despertar)
     {
         ESP_LOGI(TAG, "arranque: despertar por temporizador (causas 0x%08lX)", (unsigned long)causas_despertar);
-    } else 
+    }
+    else
     {
-        ESP_LOGI(TAG, "arranque: en frio (causas 0x%08lX)", (unsigned long)causas_despertar); 
+        ESP_LOGI(TAG, "arranque: en frio (causas 0x%08lX)", (unsigned long)causas_despertar);
     }
 
     ESP_ERROR_CHECK(tarea_polling_init());
@@ -166,7 +172,7 @@ void app_main(void)
 
         // OSF=1: el oscilador se paró y la hora no es fiable. Solo se comprueba aquí, al arrancar.
         rtc_estado_t est_osc = rtc_comprobar_oscilador();
-        /** Esto es por si hay que forzar la hora 
+        /** Esto es por si hay que forzar la hora
          * if (FORZAR_HORA)
         {
             struct tm utc = hora_compilacion_a_utc();
@@ -219,6 +225,28 @@ void app_main(void)
     if (modem_init() != MODEM_OK)
     {
         ESP_LOGE(TAG, "Fallo configurando el UART1 o el PWRKEY del modem");
+    }
+
+    for (int i = 1; i <= PRUEBA_CICLOS; i++)
+    {
+        ESP_LOGI(TAG, "ciclo %d: STATUS antes de encender = %d", i, modem_leer_status());
+        modem_estado_t est_prueba = modem_encender();
+        ESP_LOGI(TAG, "encender: est %d, STATUS = %d", est_prueba, modem_leer_status());
+
+        vTaskDelay(pdMS_TO_TICKS(PRUEBA_ENCENDIDO_MS));
+        ESP_LOGI(TAG, "antes de apagar: STATUS = %d", modem_leer_status());
+
+        est_prueba = modem_apagar();
+        ESP_LOGI(TAG, "apagar: est %d, STATUS = %d", est_prueba, modem_leer_status());
+
+        vTaskDelay(pdMS_TO_TICKS(PRUEBA_TRAS_APAGAR_MS));
+        ESP_LOGI(TAG, "tras la espera: STATUS = %d", modem_leer_status());
+    }
+
+    ESP_LOGI(TAG, "prueba terminada");
+    while (1)
+    {
+        vTaskDelay(pdMS_TO_TICKS(1000));
     }
 
     // Prioridades: el muestreo (5) no debe esperar al módem (3); la pantalla (2) es de apoyo.
