@@ -30,9 +30,10 @@
 #define USUARIO_APN "claro"
 #define CLAVE_APN "claro"
 // Servidor de pruebas del compañero: HTTP sin 's' (decidido: primero solo se comprueba la conexión)
-#define DOMINIO_SERVIDOR "http://yago.alwaysdata.net"
+#define DOMINIO_SERVIDOR "http://10.255.255.1"//"http://yago.alwaysdata.net"
 #define RUTA_MEDIDAS "/plataforma/api/v1/medidas"
-#define PANTALLA_ENCENDIDA_S 60 // El tiempo que va a estar encendida después de la tx para ver los datos
+#define HTTP_CODIGO_MODEM_MIN 600 // desde aquí, +HTTPACTION da errores del módem, no HTTP (manual V3.00, 13.3)
+#define PANTALLA_ENCENDIDA_S 60   // El tiempo que va a estar encendida después de la tx para ver los datos
 // #define SUENO_PRUEBA_S 30       // Tiempo que se duerma de prueba
 
 static const char *TAG = "transmision";
@@ -201,39 +202,41 @@ static void publicar_sd(sd_estado_t est, uint32_t ts)
         estado_sistema_publicar(FUENTE_SD, NULL, 0, ts, ESTADO_OK);
     }
 }
-/**
- * @brief Traduce un fallo de modem_http_post (estado + paso en que fallo) al tx propio.
- *
- * Timeout: en CONEXION es que no llega al servidor (5); en RESPUESTA, que el servidor
- * no contesta (7); en CONFIG y PETICION, que el modem no responde a un comando (4).
- * ERROR: en CONEXION (5); en el resto, error del modem (6).
- */
+
 static int tx_desde_http(modem_estado_t est, modem_paso_t paso)
 {
     if (est == MODEM_TIMEOUT)
     {
-        switch (paso)
-        {
-        case MODEM_PASO_CONEXION:
-            return TX_SIN_SERVIDOR;
-
-        case MODEM_PASO_RESPUESTA:
-            return TX_SIN_RESPUESTA;
-
-        case MODEM_PASO_CONFIG:
-        case MODEM_PASO_PETICION:
-        default:
-            return TX_MODEM_NO_CONTESTA;
-        }
-    }
-
-    if (paso == MODEM_PASO_CONEXION)
-    {
-        return TX_SIN_SERVIDOR;
+        return (paso == MODEM_PASO_RESPUESTA) ? TX_SIN_RESPUESTA : TX_MODEM_NO_CONTESTA;
     }
     return TX_ERROR_MODEM;
 }
 
+/** @brief Traduce un error 6xx o 7xx de +HTTPACTION al tx equivalente. */
+static int tx_desde_error_modem(int codigo)
+{
+    switch (codigo)
+    {
+    case 601:
+    case 603:
+    case 709:
+    case 712:
+    case 713:
+    case 714:
+    case 717:
+        return TX_SIN_SERVIDOR;
+
+    case 704:
+    case 705:
+    case 706:
+    case 718:
+    case 720:
+        return TX_SIN_RESPUESTA;
+
+    default:
+        return TX_ERROR_MODEM;
+    }
+}
 /**
  * @brief Envia el ciclo al servidor por HTTP (un solo intento).
  *
@@ -285,7 +288,7 @@ static int enviar_ciclo(const ciclo *lectura)
     if (est == MODEM_OK)
     {
         ESP_LOGI(TAG, "seq %lu -> HTTP %d", (unsigned long)lectura->seq, codigo);
-        return codigo;
+        return (codigo >= HTTP_CODIGO_MODEM_MIN) ? tx_desde_error_modem(codigo) : codigo;;
     }
     return tx_desde_http(est, paso);
 }

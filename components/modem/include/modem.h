@@ -37,24 +37,24 @@
 // Registro en la red
 #define MODEM_TIMEOUT_LECTURA_MS 2000    // ms de un comando de consulta rápida (señal, operador...); criterio propio
 #define MODEM_TIMEOUT_CPIN_MS 5000       // ms hasta que la SIM responde a AT+CPIN?; criterio propio
+#define MODEM_TIMEOUT_SIM_OCUPADA_MS 15000 // ms esperando a que la SIM deje de estar ocupada (+CME ERROR: 14); criterio propio: 2 x los 7,2 s medidos como máximo
 #define MODEM_TIMEOUT_REGISTRO_MS 120000 // ms; tiempo máximo de respuesta de AT+COPS= (manual 3.2.9); pasado, el ciclo sigue sin red
 #define MODEM_SONDEO_REGISTRO_MS 1000    // ms entre consultas del estado de registro mientras se espera; criterio propio
 
 #define MODEM_TAM_COMANDO 128         // bytes; el comando más largo es CNCFG o SHREQ, unos 50 B
-#define CNACT_ACTIVA 1                // <status> de AT+CNACT? cuando la conexión de datos está activa (manual 5.2.30)
-#define MODEM_TIMEOUT_CNACT_MS 85000  // ms; el manual V1.06 no da máximo ("-"): se toma el de la operación equivalente de la pila clásica (SAPBR=1, 7.2.1). Medido: 1,05–3,1 s
-#define MODEM_SONDEO_CNACT_MS 1000    // ms entre consultas de CNACT? mientras se espera la IP; criterio propio
-#define MODEM_TIMEOUT_SHCONN_MS 70000 // ms; >= el TIMEOUT de SHCONF (60 s, valor por defecto) + 10 s de margen
-#define MODEM_SHBODEXT_MS 1000        // ms que el módem espera el cuerpo; rango 100–10000 (manual 9.2.5). 525 B a 115200 baudios tardan 46 ms
-#define MODEM_PAUSA_CUERPO_MS 100     // ms entre SHBODEXT y el cuerpo; los comandos contestan en <= 20 ms (medido en el 5.1), más margen
-#define MODEM_TIMEOUT_SHREQ_MS 70000  // ms; 60 s de SHCONF "TIMEOUT" más 10 s de margen para que llegue el +SHREQ del módem
+#define MODEM_TIMEOUT_CGACT_MS 85000 // ms; el manual V3.00 no da máximo para AT+CGACT: se mantiene el valor usado con el SIM7000G#define MODEM_TIMEOUT_SHCONN_MS 70000 // ms; >= el TIMEOUT de SHCONF (60 s, valor por defecto) + 10 s de margen
+#define MODEM_HTTP_CONNECTTO_S "40"          // s; límite de conexión de HTTPACTION; decisión propia
+#define MODEM_HTTP_RESPTO_S "30"             // s; límite de respuesta del servidor; decisión propia
+#define MODEM_TIMEOUT_HTTPACTION_MS 90000    // ms; 40 + 30 + 10 de RECVTO + 10 de margen
+#define MODEM_TIMEOUT_HTTPINIT_MS 120000     // ms; máximo del manual V3.00, 13.2.1
+#define MODEM_HTTPDATA_TIEMPO 1000           // tiempo máximo para enviar el cuerpo; manual V3.00, 13.2.7 (rango 10-65535)
 
 #define MODEM_TIMEOUT_SAPBR_ABRIR_MS 85000  // tiempo max de respuesta de SAPBR = 1
 #define MODEM_TIMEOUT_SAPBR_CERRAR_MS 65000 // tiempo max de respuesta de SAPBR = 0
 
 // Tamaños de los textos de modem_red_t, ajustados a la pantalla
 #define MODEM_TAM_OPERADOR 11   // 10 visibles + '\0' (paso 5.5); se trunca aquí
-#define MODEM_TAM_TECNOLOGIA 7  // "NB-IOT" + '\0'
+#define MODEM_TAM_TECNOLOGIA 7  // "WCDMA" + '\0', con 1 B de margen
 #define MODEM_TAM_IP 16         // "255.255.255.255" + '\0'
 #define MODEM_DBM_DESCONOCIDA 0 // ningún valor de CSQ da 0 dBm
 
@@ -69,17 +69,16 @@ typedef enum
 /** @brief Paso de modem_http_post en el que falló; permite distinguir "no llega al servidor" de "el módem rechaza un comando". */
 typedef enum
 {
-    MODEM_PASO_CONFIG,   // SHCONF (URL, BODYLEN, HEADERLEN)
-    MODEM_PASO_CONEXION, // SHCONN: abre la conexión HTTP con el servidor (manual 9.2.3)
-    MODEM_PASO_PETICION, // SHAHEAD, SHBODEXT + cuerpo, envío de SHREQ(manda el POST)
-    MODEM_PASO_RESPUESTA // espera de +SHREQ y lectura del código
+    MODEM_PASO_CONFIG,   // HTTPINIT y HTTPPARA
+    MODEM_PASO_PETICION, // HTTPDATA y cuerpo
+    MODEM_PASO_RESPUESTA // HTTPACTION y espera de +HTTPACTION
 } modem_paso_t;
 
 /** @brief Datos de red del último ciclo, para la pantalla. */
 typedef struct
 {
     char operador[MODEM_TAM_OPERADOR];     // "" = sin dato
-    char tecnologia[MODEM_TAM_TECNOLOGIA]; // "GSM", "CAT-M", "NB-IOT" o ""
+    char tecnologia[MODEM_TAM_TECNOLOGIA]; // "GSM", "WCDMA", "LTE" o ""
     int16_t dbm;                           // MODEM_DBM_DESCONOCIDA = sin dato
     char ip[MODEM_TAM_IP];                 // "" = sin conexión de datos
 } modem_red_t;

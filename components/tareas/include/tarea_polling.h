@@ -7,7 +7,7 @@
 
 #define PERIODO_MUESTREO_MS 20000 // ms entre ciclos en modo de depuración; en deep sleep manda PERIODO_CICLO_S (tiempo.c)
 #define LONGITUD_COLA_CICLOS 4    // ciclos que caben en cola_lecturas (~336 B cada uno); criterio propio
-#define MODO_DEPURACION 0         // 1 = depuración(continuo cada PERIODO_MUESTREO_MS(no se duerme) 0 = deep sleep para cuando se ponga en el campo)
+#define MODO_DEPURACION 1         // 1 = depuración(continuo cada PERIODO_MUESTREO_MS(no se duerme) 0 = deep sleep para cuando se ponga en el campo)
 
 /**
  * @brief Configura el UART2 del RS-485 y crea cola_lecturas. Llamar desde app_main antes de crear las tareas.
