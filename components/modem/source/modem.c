@@ -785,13 +785,11 @@ modem_estado_t modem_leer_red(modem_red_t *red)
 
 modem_estado_t modem_gnss_encender(void)
 {
-    // Es un array de punteros constantes a caracteres(char) constantes ( de derecha a izquierda)
-    // "AT+SGPIO=0,4,1,1" : Se tiene que encender la antena que está en el GPIO 4 del modulo, datasheet.
-    static const char *const CMD_GNSS_ON[] = {"AT+CGNSTST=0", "AT+SGPIO=0,4,1,1", "AT+CGNSPWR=1", "AT+CGNSURC=1"};
+    // CVAUXS=1: alimenta la antena activa por VDD_3V (pin 44 VDD_AUX, R43, FB3); CGPS=1,1: sesión autónoma;
+    // CGPSINFO=1: un +CGPSINFO por segundo (manual V3.00, 19.2.2, 17.2.1 y 17.2.2)
+    static const char *const CMD_GNSS_ON[] = {"AT+CVAUXS=1", "AT+CGPS=1,1", "AT+CGPSINFO=1"};
     modem_estado_t est;
 
-    // sizeof(CMD_GNSS_ON) devuelve el numero de bytes del número de bytes que hay dentro del array, en este caso es 16, luego el otro devuelve siempre 4 porque
-    // es el número de byes de un puntero. Siempre la divisón va  adevolver el número de elementos en el array.
     for (size_t i = 0; i < sizeof(CMD_GNSS_ON) / sizeof(CMD_GNSS_ON[0]); i++)
     {
         est = ejecutar(CMD_GNSS_ON[i], resp_lectura, sizeof(resp_lectura), MODEM_TIMEOUT_COMANDO_MS, true);
@@ -807,7 +805,7 @@ modem_estado_t modem_gnss_esperar_fix(uint32_t timeout_ms, uint32_t *utc_out)
 {
     static char resp[MODEM_TAM_RESPUESTA];
     struct tm t;
-    int run, fix, n;
+    int n;
     int avisos = 0;
     const char *p;
     modem_estado_t est;
@@ -822,7 +820,7 @@ modem_estado_t modem_gnss_esperar_fix(uint32_t timeout_ms, uint32_t *utc_out)
 
     while ((transcurrido = ((uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS)) - t0) < timeout_ms)
     {
-        est = esperar("+UGNSINF:", resp, sizeof(resp), timeout_ms - transcurrido, NULL);
+        est = esperar("+CGPSINFO:", resp, sizeof(resp), timeout_ms - transcurrido, NULL);
         if (est == MODEM_TIMEOUT)
         {
             break;
@@ -834,18 +832,18 @@ modem_estado_t modem_gnss_esperar_fix(uint32_t timeout_ms, uint32_t *utc_out)
         }
         avisos++;
 
-        // puntero al texto que viene de la respuesta
-        p = strstr(resp, "+UGNSINF:") + strlen("+UGNSINF:");
-        // Pones a 0 todos los campos de t
+        p = strstr(resp, "+CGPSINFO:") + strlen("+CGPSINFO:");
         memset(&t, 0, sizeof(t));
-        // +UGNSINF: <run>,<fix>,yyyyMMddhhmmss.sss,... (manual 14.2.2, tabla 15-1)
-        n = sscanf(p, "%d,%d,%4d%2d%2d%2d%2d%2d", &run, &fix, &t.tm_year, &t.tm_mon,
-                   &t.tm_mday, &t.tm_hour, &t.tm_min, &t.tm_sec);
+        // +CGPSINFO: <lat>,<N/S>,<log>,<E/W>,ddmmyy,hhmmss.s,... (17.2.2). Sin fix los campos van vacíos:
+        // %*[^,] no acepta un campo vacío y sscanf se para antes de leer la fecha
+        n = sscanf(p, "%*[^,],%*[^,],%*[^,],%*[^,],%2d%2d%2d,%2d%2d%2d", &t.tm_mday, &t.tm_mon,
+                   &t.tm_year, &t.tm_hour, &t.tm_min, &t.tm_sec);
         // n va a ser el número de campos leidos que en este caso tiene que ser 8 si ha avido fix
-        if (n != 8 || fix != 1)
+        if (n != 6)
         {
             continue;
         }
+        t.tm_year += 2000; // el año llega con dos cifras; tm_a_utc espera el año completo
         *utc_out = tm_a_utc(&t);
         if (*utc_out == 0)
         {
@@ -859,7 +857,8 @@ modem_estado_t modem_gnss_esperar_fix(uint32_t timeout_ms, uint32_t *utc_out)
 
 modem_estado_t modem_gnss_apagar(void)
 {
-    static const char *const CMD_GNSS_OFF[] = {"AT+CGNSURC=0", "AT+CGNSPWR=0", "AT+SGPIO=0,4,1,0"};
+    // CGPSINFO=0 para el aviso, CGPS=0 la sesión y CVAUXS=0 corta VDD_3V de la antena (manual V3.00, 17.2.2, 17.2.1 y 19.2.2)
+    static const char *const CMD_GNSS_OFF[] = {"AT+CGPSINFO=0", "AT+CGPS=0", "AT+CVAUXS=0"};
     modem_estado_t est;
     modem_estado_t res = MODEM_OK;
 

@@ -30,7 +30,7 @@
 #define USUARIO_APN "claro"
 #define CLAVE_APN "claro"
 // Servidor de pruebas del compañero: HTTP sin 's' (decidido: primero solo se comprueba la conexión)
-#define DOMINIO_SERVIDOR "http://10.255.255.1"//"http://yago.alwaysdata.net"
+#define DOMINIO_SERVIDOR "http://yago.alwaysdata.net"
 #define RUTA_MEDIDAS "/plataforma/api/v1/medidas"
 #define HTTP_CODIGO_MODEM_MIN 600 // desde aquí, +HTTPACTION da errores del módem, no HTTP (manual V3.00, 13.3)
 #define PANTALLA_ENCENDIDA_S 60   // El tiempo que va a estar encendida después de la tx para ver los datos
