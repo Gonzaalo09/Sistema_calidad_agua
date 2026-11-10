@@ -454,8 +454,9 @@ modem_estado_t modem_sim_lista(void)
             return (strstr(resp_lectura, "+CPIN: READY") != NULL) ? MODEM_OK : MODEM_ERROR;
         }
 
-        // El módem contesta a AT antes de que la SIM esté lista. Cualquier otro error no se arregla esperando
-        if (strstr(resp_lectura, "+CME ERROR: 14") == NULL)
+        // El módem contesta a AT antes de que la SIM esté lista: da 10 (aún no la detecta) o 14 (ocupada).
+        // Cualquier otro error no se arregla esperando
+        if ((strstr(resp_lectura, "+CME ERROR: 10") == NULL) && (strstr(resp_lectura, "+CME ERROR: 14") == NULL))
         {
             return MODEM_ERROR;
         }

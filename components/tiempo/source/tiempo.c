@@ -22,7 +22,7 @@
 #define UMBRAL_NTP_MS 1700                        // ms; con CNTP solo se escribe el DS3231 por encima de esto
 #define SERVIDOR_NTP "south-america.pool.ntp.org" // depende de la región: README, "Desplegar en otro país"
 
-#define PERIODO_CICLO_S 600   // Periodo en el que se despertará
+#define PERIODO_CICLO_S 180   // Periodo en el que se despertará
 #define MARGEN_DESPERTAR_S 15 // Margen que le damos por la deriva del reloj del esp
 #define SONDEO_MARCA_MS 10    // ms entre lecturas del DS3231 esperando la marca; provisional: basta con <= 1 s de exactitud y cada lectura cuesta ~1 ms
 

@@ -288,7 +288,8 @@ static int enviar_ciclo(const ciclo *lectura)
     if (est == MODEM_OK)
     {
         ESP_LOGI(TAG, "seq %lu -> HTTP %d", (unsigned long)lectura->seq, codigo);
-        return (codigo >= HTTP_CODIGO_MODEM_MIN) ? tx_desde_error_modem(codigo) : codigo;;
+        return (codigo >= HTTP_CODIGO_MODEM_MIN) ? tx_desde_error_modem(codigo) : codigo;
+        ;
     }
     return tx_desde_http(est, paso);
 }
@@ -379,7 +380,7 @@ static void secuencia_final(void)
     modem_estado_t modem_est;
 
     modem_est = modem_apagar();
-    ESP_LOGI(TAG, "modem_apagar: est %d", modem_est);
+    ESP_LOGI(TAG, "modem_apagar: est %d, STATUS %d", modem_est, modem_leer_status());
     if (modem_est != MODEM_OK)
     {
         ESP_LOGW(TAG, "el modem no confirma el apagado: se duerme igualmente");
