@@ -32,8 +32,8 @@
 #define STAT_DENEGADO 3    // Registro denegado por la red
 #define STAT_REG_ROAMING 5 // Registrado en otra red (roaming)
 
-#define SAPBR_CONECTADO 1 // Respuesta de SAPBR cuando esta conectado
-#define CNTP_OK 1         // Código de +CNTP cuando trae la hora
+#define CNTP_OK 0             // +CNTP: 0 = hora actualizada; no trae la hora (manual V3.00, 15.2.2)
+#define CCLK_S_POR_CUARTO 900 // la zona de +CCLK va en cuartos de hora (3.2.17)
 
 static const char *TAG = "modem";
 
@@ -873,59 +873,15 @@ modem_estado_t modem_gnss_apagar(void)
     return res;
 }
 
-modem_estado_t modem_portador_abrir(const char *apn, const char *usuario, const char *clave)
-{
-    static char resp[MODEM_TAM_RESPUESTA];
-    static char cmd[MODEM_TAM_COMANDO];
-    const char *const PARAM[] = {"APN", "USER", "PWD"};
-    const char *valor[] = {apn, usuario, clave};
-    const char *datos;
-    int cid, estado;
-    modem_estado_t est;
-
-    if ((apn == NULL) || (usuario == NULL) || (clave == NULL))
-    {
-        return MODEM_ERROR;
-    }
-
-    // Mirar si ya está abierto, (mismo patrón que modem_abrir_datos). Respuesta: +SAPBR: 1,1,"<ip>" (7.2.1)
-    if ((consultar("AT+SAPBR=2,1", "+SAPBR:", &datos, true) == MODEM_OK) && (sscanf(datos, "%d,%d", &cid, &estado) == 2) && (estado == SAPBR_CONECTADO))
-    {
-        return MODEM_OK;
-    }
-
-    for (size_t i = 0; i < sizeof(PARAM) / sizeof(PARAM[0]); i++)
-    {
-        // snprintf crea el comando que luego se envia aunque no entre dentro del if (logico)
-        if (snprintf(cmd, sizeof(cmd), "AT+SAPBR=3,1,\"%s\",\"%s\"", PARAM[i], valor[i]) >= (int)sizeof(cmd))
-        {
-            return MODEM_ERROR;
-        }
-        est = ejecutar(cmd, resp, sizeof(resp), MODEM_TIMEOUT_COMANDO_MS, true);
-        if (est != MODEM_OK)
-        {
-            return est;
-        }
-    }
-    // Contesta OK cuando ya está abierto (medido: 60 ms)
-    return ejecutar("AT+SAPBR=1,1", resp, sizeof(resp), MODEM_TIMEOUT_SAPBR_ABRIR_MS, true);
-}
-
-modem_estado_t modem_portador_cerrar(void)
-{
-    static char resp[MODEM_TAM_RESPUESTA];
-
-    // Si ya estaba cerrado da ERROR: quien llama lo ignora, se cierra "siempre"
-    return ejecutar("AT+SAPBR=0,1", resp, sizeof(resp), MODEM_TIMEOUT_SAPBR_CERRAR_MS, true);
-}
-
 modem_estado_t modem_cntp(const char *servidor, uint32_t timeout_ms, uint32_t *utc_out, int *codigo_out)
 {
     static char resp[MODEM_TAM_RESPUESTA];
     static char cmd[MODEM_TAM_COMANDO];
     struct tm t = {0};
-    const char *p;
+    const char *d;
+    int zona = 0; // sin zona válida, CCLK no la devuelve (3.2.17, nota 1)
     int n;
+    uint32_t local;
     modem_estado_t est;
 
     if ((servidor == NULL) || (utc_out == NULL) || (codigo_out == NULL))
@@ -934,10 +890,10 @@ modem_estado_t modem_cntp(const char *servidor, uint32_t timeout_ms, uint32_t *u
     }
 
     *utc_out = 0;
-    *codigo_out = 0;
+    *codigo_out = MODEM_CNTP_SIN_CODIGO;
 
-    // Zona 0 = UTC, cid 1 = el portador SAPBR, modo 2 (11.2.2)
-    if (snprintf(cmd, sizeof(cmd), "AT+CNTP=\"%s\",0,1,2", servidor) >= (int)sizeof(cmd))
+    // Zona 0 = UTC. En la SIM7600 solo hay servidor y zona: ni cid ni modo (15.2.1)
+    if (snprintf(cmd, sizeof(cmd), "AT+CNTP=\"%s\",0", servidor) >= (int)sizeof(cmd))
     {
         return MODEM_ERROR;
     }
@@ -947,16 +903,13 @@ modem_estado_t modem_cntp(const char *servidor, uint32_t timeout_ms, uint32_t *u
         return est;
     }
 
-    // Igual que SHREQ: enviar_linea + esperar el aviso, sin ejecutar(). Así el OK
-    // y un +CNTP rápido (p. ej. 61) llegan al mismo buffer y no se pierde ninguno
+    // enviar_linea + esperar, sin ejecutar(): el OK y un +CNTP rápido llegan al mismo buffer
     est = enviar_linea("AT+CNTP");
     if (est != MODEM_OK)
     {
         return est;
     }
-
     est = esperar("+CNTP:", resp, sizeof(resp), timeout_ms, NULL);
-    // NULL porque la hora se escribe en el RTC nada más volver, silencioso no necesitamos ver nada
     if (est == MODEM_TIMEOUT)
     {
         ESP_LOGW(TAG, "sin +CNTP en %lu ms", timeout_ms);
@@ -968,26 +921,35 @@ modem_estado_t modem_cntp(const char *servidor, uint32_t timeout_ms, uint32_t *u
         return MODEM_ERROR;
     }
 
-    p = strstr(resp, "+CNTP:");
-    n = sscanf(p + strlen("+CNTP:"), "%d,\"%4d/%2d/%2d,%2d:%2d:%2d\"", codigo_out,
-               &t.tm_year, &t.tm_mon, &t.tm_mday, &t.tm_hour, &t.tm_min, &t.tm_sec);
+    sscanf(strstr(resp, "+CNTP:") + strlen("+CNTP:"), "%d", codigo_out);
     if (*codigo_out != CNTP_OK)
     {
         ESP_LOGW(TAG, "+CNTP: %d", *codigo_out);
         return MODEM_ERROR;
     }
-    if (n != 7)
+
+    // +CNTP: 0 no trae la hora: se lee del reloj del módem. +CCLK: "yy/MM/dd,hh:mm:ss±zz" (3.2.17)
+    est = consultar("AT+CCLK?", "+CCLK:", &d, true);
+    if (est != MODEM_OK)
     {
-        ESP_LOGW(TAG, "hora ilegible: %s", p);
+        return est;
+    }
+    n = sscanf(d, " \"%2d/%2d/%2d,%2d:%2d:%2d%3d", &t.tm_year, &t.tm_mon, &t.tm_mday,
+               &t.tm_hour, &t.tm_min, &t.tm_sec, &zona);
+    if (n < 6)
+    {
+        ESP_LOGW(TAG, "hora ilegible: %s", d);
         return MODEM_ERROR;
     }
+    t.tm_year += 2000; // dos cifras, igual que en +CGPSINFO
 
-    *utc_out = tm_a_utc(&t);
-    if (*utc_out == 0)
+    local = tm_a_utc(&t);
+    if (local == 0)
     {
         return MODEM_ERROR;
     }
-
+    // AT+CTZU vale 1 de fábrica: la red puede cambiar la zona después de CNTP, así que se resta siempre
+    *utc_out = local - zona * CCLK_S_POR_CUARTO;
     return MODEM_OK;
 }
 

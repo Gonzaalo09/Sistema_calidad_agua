@@ -49,14 +49,13 @@
 #define MODEM_TIMEOUT_HTTPINIT_MS 120000     // ms; máximo del manual V3.00, 13.2.1
 #define MODEM_HTTPDATA_TIEMPO 1000           // tiempo máximo para enviar el cuerpo; manual V3.00, 13.2.7 (rango 10-65535)
 
-#define MODEM_TIMEOUT_SAPBR_ABRIR_MS 85000  // tiempo max de respuesta de SAPBR = 1
-#define MODEM_TIMEOUT_SAPBR_CERRAR_MS 65000 // tiempo max de respuesta de SAPBR = 0
-
 // Tamaños de los textos de modem_red_t, ajustados a la pantalla
 #define MODEM_TAM_OPERADOR 11   // 10 visibles + '\0' (paso 5.5); se trunca aquí
 #define MODEM_TAM_TECNOLOGIA 7  // "WCDMA" + '\0', con 1 B de margen
 #define MODEM_TAM_IP 16         // "255.255.255.255" + '\0'
 #define MODEM_DBM_DESCONOCIDA 0 // ningún valor de CSQ da 0 dBm
+
+#define MODEM_CNTP_SIN_CODIGO (-1) // no llegó +CNTP; 0 es éxito en la SIM7600 (manual V3.00, 15.2.2)
 
 /** @brief Resultado de una operación con el módem. */
 typedef enum
@@ -173,10 +172,6 @@ modem_estado_t modem_gnss_encender(void);
 modem_estado_t modem_gnss_esperar_fix(uint32_t timeout_ms, uint32_t *utc_out);
 
 modem_estado_t modem_gnss_apagar(void);
-
-modem_estado_t modem_portador_abrir(const char *apn, const char *usuario, const char *clave);
-
-modem_estado_t modem_portador_cerrar(void);
 
 modem_estado_t modem_cntp(const char *servidor, uint32_t timeout_ms, uint32_t *utc_out, int *codigo_out);
 

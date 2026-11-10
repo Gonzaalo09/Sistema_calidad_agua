@@ -22,14 +22,14 @@
 #define UMBRAL_NTP_MS 1700                        // ms; con CNTP solo se escribe el DS3231 por encima de esto
 #define SERVIDOR_NTP "south-america.pool.ntp.org" // depende de la región: README, "Desplegar en otro país"
 
-#define PERIODO_CICLO_S 600 // Periodo en el que se despertará 
-#define MARGEN_DESPERTAR_S 15  // Margen que le damos por la deriva del reloj del esp
-#define SONDEO_MARCA_MS 10 // ms entre lecturas del DS3231 esperando la marca; provisional: basta con <= 1 s de exactitud y cada lectura cuesta ~1 ms
+#define PERIODO_CICLO_S 600   // Periodo en el que se despertará
+#define MARGEN_DESPERTAR_S 15 // Margen que le damos por la deriva del reloj del esp
+#define SONDEO_MARCA_MS 10    // ms entre lecturas del DS3231 esperando la marca; provisional: basta con <= 1 s de exactitud y cada lectura cuesta ~1 ms
 
 // Para prueba de casos distintos: 0 = normal; 1 = ciclo largo; 2 = despertar tarde; 3 = hora no valida. La usa la copia de prueba comentada de tiempo_segundos_hasta_despertar
 // #define PRUEBA_CASO 2
 
-static RTC_DATA_ATTR uint32_t marca_objetivo; // UTC en s; 0 = sin rejilla, en RTC slow porque tiene que sobrevivir el deep_sleep. Guarda siempre la marca sin el margen 
+static RTC_DATA_ATTR uint32_t marca_objetivo; // UTC en s; 0 = sin rejilla, en RTC slow porque tiene que sobrevivir el deep_sleep. Guarda siempre la marca sin el margen
 
 static const char *TAG = "Tiempo";
 
@@ -168,8 +168,8 @@ void tiempo_sincronizar(const char *apn, const char *usuario, const char *clave)
 
     if (!sincronizado && (t_sync == 0 || ahora - t_sync >= PERIODO_NTP_S))
     {
-        int codigo = 0;
-        modem_estado_t est_cntp = modem_portador_abrir(apn, usuario, clave);
+        int codigo = MODEM_CNTP_SIN_CODIGO;
+        modem_estado_t est_cntp = modem_abrir_datos(apn, usuario, clave);
         if (est_cntp == MODEM_OK)
         {
             est_cntp = modem_cntp(SERVIDOR_NTP, TIMEOUT_CNTP_MS, &utc_fuente, &codigo);
@@ -209,7 +209,6 @@ void tiempo_sincronizar(const char *apn, const char *usuario, const char *clave)
         {
             ESP_LOGW(TAG, "CNTP fallido: %i", codigo);
         }
-        modem_portador_cerrar();
     }
 
     if (sincronizado)
@@ -269,7 +268,7 @@ void tiempo_esperar_marca(void)
     ESP_LOGI(TAG, "marca alcanzada a los %lld ms del arranque", esp_timer_get_time() / 1000);
 }
 
-// ESTO ES EL AUTENTICO EL QUE FUNCIONA 
+// ESTO ES EL AUTENTICO EL QUE FUNCIONA
 uint32_t tiempo_segundos_hasta_despertar(void)
 {
     uint32_t ahora;
@@ -288,16 +287,15 @@ uint32_t tiempo_segundos_hasta_despertar(void)
 
     if (marca_objetivo != 0 && (marca > (marca_objetivo + PERIODO_CICLO_S)))
     {
-        ESP_LOGW(TAG, "ciclo largo: se saltan %lu marcas", (marca - marca_objetivo) / PERIODO_CICLO_S - 1);       
+        ESP_LOGW(TAG, "ciclo largo: se saltan %lu marcas", (marca - marca_objetivo) / PERIODO_CICLO_S - 1);
     }
 
-    marca_objetivo = marca; 
-    ESP_LOGI(TAG, "proxima marca %lu, duermo %lu s", marca, marca - MARGEN_DESPERTAR_S - ahora); 
-    return marca - MARGEN_DESPERTAR_S - ahora; 
+    marca_objetivo = marca;
+    ESP_LOGI(TAG, "proxima marca %lu, duermo %lu s", marca, marca - MARGEN_DESPERTAR_S - ahora);
+    return marca - MARGEN_DESPERTAR_S - ahora;
 }
 
-
-// ESTE ES DE PRUEBA 
+// ESTE ES DE PRUEBA
 /** uint32_t tiempo_segundos_hasta_despertar(void)
 {
     uint32_t ahora;
@@ -336,5 +334,5 @@ uint32_t tiempo_segundos_hasta_despertar(void)
     }
 
     return marca - MARGEN_DESPERTAR_S - ahora;
-} 
+}
 */
